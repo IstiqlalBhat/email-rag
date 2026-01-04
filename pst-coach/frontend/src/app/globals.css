@@ -3,31 +3,53 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --foreground-rgb: 36, 59, 83;
+  /* Mineral 800 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
+    --foreground-rgb: 240, 244, 248;
+    /* Mineral 50 */
   }
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  min-height: 100vh;
+  /* Strong fallback background to prevent "all white" feel */
+  background: linear-gradient(135deg, #f9f8fa 0%, #eaddd7 100%);
+  font-family: var(--font-outfit), system-ui, sans-serif;
+  overflow-x: hidden;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+@layer components {
+
+  /* Rich Glass Card - noticeable backdrop */
+  .rich-glass {
+    @apply backdrop-blur-3xl bg-white/60 dark:bg-mineral-900/60 shadow-soft border border-white/40 dark:border-mineral-700/50;
+    transition: transform 0.4s ease, box-shadow 0.4s ease;
   }
+
+  .rich-glass:hover {
+    @apply shadow-glow transform -translate-y-1;
+  }
+
+  /* Typography */
+  .display-text {
+    @apply font-serif font-medium tracking-tight text-mineral-900 dark:text-mineral-50;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-terra-300 rounded-full;
 }

@@ -878,5 +878,3 @@ Contributions welcome! Please:
 MIT
 
 ---
-
-**Built with Claude Code** - An AI-powered CLI tool from Anthropic

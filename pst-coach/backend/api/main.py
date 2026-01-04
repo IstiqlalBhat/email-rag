@@ -29,17 +29,17 @@ app = FastAPI(
     redoc_url="/api/redoc" if settings.DEBUG else None,
 )
 
-# Middleware
+# Middleware - CORS must be added LAST to be executed FIRST on requests
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.get_cors_origins(),
+    allow_origins=["*"] if settings.DEBUG else settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(ErrorHandlerMiddleware)
-app.add_middleware(RequestIDMiddleware)
 
 # API Routes
 app.include_router(uploads.router, prefix="/api/uploads", tags=["Uploads"])

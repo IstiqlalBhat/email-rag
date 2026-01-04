@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import LiquidButton from '@/components/ui/LiquidButton'
+import VisualizationPanel from '@/components/visualizations/VisualizationPanel'
 import {
   Send,
   ArrowLeft,
@@ -14,7 +15,8 @@ import {
   FileText,
   Calendar,
   Mail,
-  Quote
+  Quote,
+  BarChart3
 } from 'lucide-react'
 import api from '@/lib/api'
 
@@ -44,7 +46,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [activeMode, setActiveMode] = useState<'ask' | 'coach'>('coach')
+  const [activeMode, setActiveMode] = useState<'ask' | 'coach' | 'explore'>('coach')
   const [uploadId, setUploadId] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -207,6 +209,16 @@ export default function ChatPage() {
               <Sparkles className="w-4 h-4" />
               Coach Me
             </button>
+            <button
+              onClick={() => setActiveMode('explore')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${activeMode === 'explore'
+                ? 'bg-amber-600 text-white shadow-md'
+                : 'text-mineral-500 hover:text-amber-700 hover:bg-amber-50'
+                }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Explore
+            </button>
           </div>
         </div>
       </header>
@@ -214,189 +226,222 @@ export default function ChatPage() {
       {/* Messages Area */}
       <main className="flex-1 overflow-y-auto w-full">
         <div className="max-w-4xl mx-auto px-4 py-10">
-          {messages.length === 0 ? (
-            // Empty State
-            <div className="text-center py-16 space-y-8">
-              <div className={`
+          {activeMode === 'explore' ? (
+            // Explore Mode - Visualizations
+            <div className="space-y-6">
+              <div className="text-center space-y-3 mb-8">
+                <h2 className="text-3xl font-serif font-medium text-mineral-900">
+                  Explore Your Patterns
+                </h2>
+                <p className="text-mineral-600">
+                  Visualize your email activity, common topics, and connections
+                </p>
+              </div>
+              {uploadId ? (
+                <VisualizationPanel
+                  uploadId={uploadId}
+                  onSearchWord={(word) => {
+                    setActiveMode('ask')
+                    setInput(`Show me emails about "${word}"`)
+                  }}
+                  onSearchContact={(name) => {
+                    setActiveMode('ask')
+                    setInput(`Show me emails with ${name}`)
+                  }}
+                />
+              ) : (
+                <div className="text-center py-16 bg-white/40 rounded-2xl">
+                  <p className="text-mineral-500">Upload a PST file first to see visualizations</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            messages.length === 0 ? (
+              // Empty State
+              <div className="text-center py-16 space-y-8">
+                <div className={`
                 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-lg
                 ${activeMode === 'coach' ? 'bg-terra-100 text-terra-600' : 'bg-mineral-100 text-mineral-600'}
               `}>
-                {activeMode === 'coach' ? (
-                  <Sparkles className="w-12 h-12" />
-                ) : (
-                  <MessageCircle className="w-12 h-12" />
-                )}
-              </div>
+                  {activeMode === 'coach' ? (
+                    <Sparkles className="w-12 h-12" />
+                  ) : (
+                    <MessageCircle className="w-12 h-12" />
+                  )}
+                </div>
 
-              <div className="space-y-3">
-                <h2 className="text-4xl font-serif font-medium text-mineral-900">
-                  {activeMode === 'coach'
-                    ? 'Ready to coach you'
-                    : 'Ask about your emails'
-                  }
-                </h2>
-                <p className="text-lg text-mineral-600 max-w-lg mx-auto">
-                  {activeMode === 'coach'
-                    ? 'I uncover patterns in your communication style and workload.'
-                    : 'Search your history using natural language. No keywords needed.'
-                  }
-                </p>
-              </div>
+                <div className="space-y-3">
+                  <h2 className="text-4xl font-serif font-medium text-mineral-900">
+                    {activeMode === 'coach'
+                      ? 'Ready to coach you'
+                      : 'Ask about your emails'
+                    }
+                  </h2>
+                  <p className="text-lg text-mineral-600 max-w-lg mx-auto">
+                    {activeMode === 'coach'
+                      ? 'I uncover patterns in your communication style and workload.'
+                      : 'Search your history using natural language. No keywords needed.'
+                    }
+                  </p>
+                </div>
 
-              {/* Suggested Prompts */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                {SUGGESTED_PROMPTS.map((prompt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSend(prompt.text)}
-                    className="
+                {/* Suggested Prompts */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                  {SUGGESTED_PROMPTS.map((prompt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSend(prompt.text)}
+                      className="
                       text-left p-6 rounded-2xl bg-white/60 border border-white/80 shadow-sm
                       hover:bg-white hover:shadow-md hover:border-terra-200 transition-all duration-300 group
                     "
-                  >
-                    <span className="text-2xl mr-3 inline-block">{prompt.icon}</span>
-                    <span className="text-mineral-700 font-medium group-hover:text-terra-700 transition-colors">
-                      {prompt.text}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            // Messages List
-            <div className="space-y-8">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}
-                >
-                  {message.role === 'assistant' && (
-                    <div className="w-10 h-10 rounded-full bg-terra-100 flex items-center justify-center flex-shrink-0 border border-terra-200">
-                      <Bot className="w-5 h-5 text-terra-700" />
-                    </div>
-                  )}
-
-                  <div className={`max-w-[85%] lg:max-w-[75%] ${message.role === 'user' ? 'order-first' : ''}`}>
-                    <div
-                      className={`rounded-3xl px-6 py-4 shadow-sm ${message.role === 'user'
-                        ? 'bg-terra-600 text-white rounded-br-sm'
-                        : 'bg-white text-mineral-800 border border-mineral-100 rounded-bl-sm'
-                        }`}
                     >
-                      <p className="whitespace-pre-wrap leading-relaxed text-base">{message.content}</p>
-                    </div>
+                      <span className="text-2xl mr-3 inline-block">{prompt.icon}</span>
+                      <span className="text-mineral-700 font-medium group-hover:text-terra-700 transition-colors">
+                        {prompt.text}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              // Messages List
+              <div className="space-y-8">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}
+                  >
+                    {message.role === 'assistant' && (
+                      <div className="w-10 h-10 rounded-full bg-terra-100 flex items-center justify-center flex-shrink-0 border border-terra-200">
+                        <Bot className="w-5 h-5 text-terra-700" />
+                      </div>
+                    )}
 
-                    {/* Citations */}
-                    {message.citations && message.citations.length > 0 && (
-                      <div className="mt-4 space-y-3 pl-4 border-l-2 border-terra-200">
-                        <p className="text-xs text-mineral-400 uppercase tracking-widest font-bold">Sources Identified</p>
-                        {message.citations.map((citation, i) => (
-                          <div
-                            key={i}
-                            className="bg-white/40 rounded-xl p-4 text-sm border border-white/60 hover:bg-white/80 transition-colors cursor-pointer"
-                          >
-                            <div className="flex items-center gap-3 text-mineral-500 mb-2">
-                              <Calendar className="w-3.5 h-3.5" />
-                              <span className="font-medium">{citation.date}</span>
-                              <Mail className="w-3.5 h-3.5 ml-2" />
-                              <span className="font-medium">{citation.sender}</span>
+                    <div className={`max-w-[85%] lg:max-w-[75%] ${message.role === 'user' ? 'order-first' : ''}`}>
+                      <div
+                        className={`rounded-3xl px-6 py-4 shadow-sm ${message.role === 'user'
+                          ? 'bg-terra-600 text-white rounded-br-sm'
+                          : 'bg-white text-mineral-800 border border-mineral-100 rounded-bl-sm'
+                          }`}
+                      >
+                        <p className="whitespace-pre-wrap leading-relaxed text-base">{message.content}</p>
+                      </div>
+
+                      {/* Citations */}
+                      {message.citations && message.citations.length > 0 && (
+                        <div className="mt-4 space-y-3 pl-4 border-l-2 border-terra-200">
+                          <p className="text-xs text-mineral-400 uppercase tracking-widest font-bold">Sources Identified</p>
+                          {message.citations.map((citation, i) => (
+                            <div
+                              key={i}
+                              className="bg-white/40 rounded-xl p-4 text-sm border border-white/60 hover:bg-white/80 transition-colors cursor-pointer"
+                            >
+                              <div className="flex items-center gap-3 text-mineral-500 mb-2">
+                                <Calendar className="w-3.5 h-3.5" />
+                                <span className="font-medium">{citation.date}</span>
+                                <Mail className="w-3.5 h-3.5 ml-2" />
+                                <span className="font-medium">{citation.sender}</span>
+                              </div>
+                              {citation.subject && (
+                                <p className="text-mineral-800 font-medium flex items-start gap-2">
+                                  <Quote className="w-3.5 h-3.5 mt-1 text-terra-500 flex-shrink-0" />
+                                  {citation.subject}
+                                </p>
+                              )}
                             </div>
-                            {citation.subject && (
-                              <p className="text-mineral-800 font-medium flex items-start gap-2">
-                                <Quote className="w-3.5 h-3.5 mt-1 text-terra-500 flex-shrink-0" />
-                                {citation.subject}
-                              </p>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Mode Badge */}
+                      {message.mode && message.role === 'assistant' && (
+                        <div className="mt-2 ml-2">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-mineral-100 text-mineral-600">
+                            {message.mode === 'insights' ? (
+                              <>
+                                <Sparkles className="w-3 h-3 text-terra-500" />
+                                Coaching Insight
+                              </>
+                            ) : (
+                              <>
+                                <MessageCircle className="w-3 h-3 text-mineral-600" />
+                                Search Result
+                              </>
                             )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-                    {/* Mode Badge */}
-                    {message.mode && message.role === 'assistant' && (
-                      <div className="mt-2 ml-2">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-mineral-100 text-mineral-600">
-                          {message.mode === 'insights' ? (
-                            <>
-                              <Sparkles className="w-3 h-3 text-terra-500" />
-                              Coaching Insight
-                            </>
-                          ) : (
-                            <>
-                              <MessageCircle className="w-3 h-3 text-mineral-600" />
-                              Search Result
-                            </>
-                          )}
-                        </span>
+                    {message.role === 'user' && (
+                      <div className="w-10 h-10 rounded-full bg-mineral-800 flex items-center justify-center flex-shrink-0 shadow-md">
+                        <User className="w-5 h-5 text-white" />
                       </div>
                     )}
                   </div>
+                ))}
 
-                  {message.role === 'user' && (
-                    <div className="w-10 h-10 rounded-full bg-mineral-800 flex items-center justify-center flex-shrink-0 shadow-md">
-                      <User className="w-5 h-5 text-white" />
+                {/* Loading Indicator */}
+                {isLoading && (
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 rounded-full bg-terra-100 flex items-center justify-center border border-terra-200">
+                      <Loader2 className="w-5 h-5 text-terra-600 animate-spin" />
                     </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Loading Indicator */}
-              {isLoading && (
-                <div className="flex gap-4">
-                  <div className="w-10 h-10 rounded-full bg-terra-100 flex items-center justify-center border border-terra-200">
-                    <Loader2 className="w-5 h-5 text-terra-600 animate-spin" />
-                  </div>
-                  <div className="bg-white/50 rounded-2xl px-6 py-4 border border-white/60">
-                    <div className="flex items-center gap-2 text-mineral-500">
-                      <span className="font-medium">Analyzing patterns</span>
-                      <span className="animate-pulse">...</span>
+                    <div className="bg-white/50 rounded-2xl px-6 py-4 border border-white/60">
+                      <div className="flex items-center gap-2 text-mineral-500">
+                        <span className="font-medium">Analyzing patterns</span>
+                        <span className="animate-pulse">...</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              <div ref={messagesEndRef} />
-            </div>
+                <div ref={messagesEndRef} />
+              </div>
+            )
           )}
         </div>
       </main>
 
-      {/* Input Area */}
-      <footer className="border-t border-mineral-200 bg-white/80 backdrop-blur-xl sticky bottom-0 z-50">
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <div className="relative shadow-lg rounded-2xl bg-white transition-shadow hover:shadow-xl">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyPress}
-              placeholder={
-                activeMode === 'coach'
-                  ? 'Ask for coaching insights...'
-                  : 'Search your emails...'
-              }
-              rows={1}
-              className="
-                w-full bg-transparent border-0 rounded-2xl px-6 py-4 pr-16 
-                text-mineral-900 placeholder-mineral-400 
-                focus:ring-2 focus:ring-terra-500/50 resize-none max-h-32 min-h-[60px]
-                text-lg
-              "
-            />
-            <div className="absolute right-2 bottom-2">
-              <LiquidButton
-                onClick={() => handleSend()}
-                disabled={!input.trim() || isLoading}
-                className="!p-3 !rounded-xl !bg-terra-600 hover:!bg-terra-500 !shadow-none"
-              >
-                <Send className="w-5 h-5 text-white" />
-              </LiquidButton>
+      {/* Input Area - Hidden in Explore mode */}
+      {activeMode !== 'explore' && (
+        <footer className="border-t border-mineral-200 bg-white/80 backdrop-blur-xl sticky bottom-0 z-50">
+          <div className="max-w-4xl mx-auto px-4 py-6">
+            <div className="relative shadow-lg rounded-2xl bg-white transition-shadow hover:shadow-xl">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder={
+                  activeMode === 'coach'
+                    ? 'Ask for coaching insights...'
+                    : 'Search your emails...'
+                }
+                rows={1}
+                className="
+                  w-full bg-transparent border-0 rounded-2xl px-6 py-4 pr-16 
+                  text-mineral-900 placeholder-mineral-400 
+                  focus:ring-2 focus:ring-terra-500/50 resize-none max-h-32 min-h-[60px]
+                  text-lg
+                "
+              />
+              <div className="absolute right-2 bottom-2">
+                <LiquidButton
+                  onClick={() => handleSend()}
+                  disabled={!input.trim() || isLoading}
+                  className="!p-3 !rounded-xl !bg-terra-600 hover:!bg-terra-500 !shadow-none"
+                >
+                  <Send className="w-5 h-5 text-white" />
+                </LiquidButton>
+              </div>
             </div>
+            <p className="text-xs text-mineral-400 mt-4 text-center font-medium">
+              AI-generated insights based on your email history. Privacy protected.
+            </p>
           </div>
-          <p className="text-xs text-mineral-400 mt-4 text-center font-medium">
-            AI-generated insights based on your email history. Privacy protected.
-          </p>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   )
 }

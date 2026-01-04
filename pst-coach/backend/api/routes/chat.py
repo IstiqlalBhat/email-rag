@@ -4,7 +4,7 @@ Chat routes for RAG and coaching modes.
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional, Dict
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from graph.chat_graph import chat_graph, content_rag, insights_rag, generate_response, ChatState
 from loguru import logger
 
@@ -45,9 +45,17 @@ async def router_chat(request: ChatRequest):
     Unified chat endpoint that uses LangGraph to route and answer.
     Respects the 'mode' parameter: 'content' for Ask Inbox, 'insights' for Coach Me.
     """
-    # Convert to LangChain format
-    lc_messages = [HumanMessage(content=msg.content) for msg in request.messages if msg.role == "user"]
-    if not lc_messages:
+    # Convert all messages to LangChain format, preserving conversation history
+    lc_messages = []
+    has_user_message = False
+    for msg in request.messages:
+        if msg.role == "user":
+            lc_messages.append(HumanMessage(content=msg.content))
+            has_user_message = True
+        else:
+            lc_messages.append(AIMessage(content=msg.content))
+    
+    if not has_user_message:
         return ChatResponse(content="No user message found.", mode_used="error")
 
     logger.info(f"Chat request - mode: {request.mode}, upload_id: {request.upload_id}")

@@ -131,8 +131,13 @@ export default function ChatPage() {
     setIsLoading(true)
 
     try {
+      // Send full conversation history for context-aware responses
+      const fullHistory = messages
+        .map(m => ({ role: m.role, content: m.content }))
+        .concat([{ role: 'user', content: text }])
+
       const response = await api.post('/api/chat/router', {
-        messages: [{ role: 'user', content: text }],
+        messages: fullHistory,
         upload_id: uploadId,
         mode: activeMode === 'coach' ? 'insights' : 'content',
       })
@@ -185,8 +190,8 @@ export default function ChatPage() {
             <button
               onClick={() => setActiveMode('ask')}
               className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${activeMode === 'ask'
-                  ? 'bg-mineral-800 text-white shadow-md'
-                  : 'text-mineral-500 hover:text-mineral-800 hover:bg-mineral-50'
+                ? 'bg-mineral-800 text-white shadow-md'
+                : 'text-mineral-500 hover:text-mineral-800 hover:bg-mineral-50'
                 }`}
             >
               <MessageCircle className="w-4 h-4" />
@@ -195,8 +200,8 @@ export default function ChatPage() {
             <button
               onClick={() => setActiveMode('coach')}
               className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${activeMode === 'coach'
-                  ? 'bg-terra-600 text-white shadow-md'
-                  : 'text-mineral-500 hover:text-terra-700 hover:bg-terra-50'
+                ? 'bg-terra-600 text-white shadow-md'
+                : 'text-mineral-500 hover:text-terra-700 hover:bg-terra-50'
                 }`}
             >
               <Sparkles className="w-4 h-4" />
@@ -274,8 +279,8 @@ export default function ChatPage() {
                   <div className={`max-w-[85%] lg:max-w-[75%] ${message.role === 'user' ? 'order-first' : ''}`}>
                     <div
                       className={`rounded-3xl px-6 py-4 shadow-sm ${message.role === 'user'
-                          ? 'bg-terra-600 text-white rounded-br-sm'
-                          : 'bg-white text-mineral-800 border border-mineral-100 rounded-bl-sm'
+                        ? 'bg-terra-600 text-white rounded-br-sm'
+                        : 'bg-white text-mineral-800 border border-mineral-100 rounded-bl-sm'
                         }`}
                     >
                       <p className="whitespace-pre-wrap leading-relaxed text-base">{message.content}</p>

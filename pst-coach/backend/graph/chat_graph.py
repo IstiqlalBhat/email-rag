@@ -110,12 +110,43 @@ def route_to_mode(state: ChatState) -> Literal["content_rag", "insights_rag"]:
 
 
 def content_rag(state: ChatState) -> ChatState:
-    """Content RAG: retrieve from email chunks in Pinecone."""
+    """Content RAG: retrieve from email chunks in Pinecone with query expansion."""
     logger.info("Running Content RAG")
     state["mode_used"] = "content"
     
-    last_message = state["messages"][-1]
-    query = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    messages = state.get("messages", [])
+    last_message = messages[-1] if messages else None
+    
+    if not last_message:
+        state["context_str"] = "No query provided."
+        state["sources"] = []
+        return state
+    
+    original_query = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    logger.info(f"Original query: {original_query[:100]}...")
+    
+    # Query expansion: extract key search terms for better vector match
+    # This converts "Any emails from Dina?" → "Dina Hi Dina Dear Dina Dina Cartagena"
+    try:
+        expansion_prompt = f"""Extract the key search terms from this question about emails.
+Output ONLY the search terms, nothing else. Include variations like:
+- The person's name in different forms (first name, full name, "Hi [Name]", "Dear [Name]")
+- Key topics or subjects mentioned
+- Any specific dates or keywords
+
+Question: {original_query}
+
+Search terms:"""
+        
+        expansion_response = llm.invoke(expansion_prompt)
+        expanded_terms = expansion_response.content.strip()
+        
+        # Combine original query with expanded terms for better coverage
+        search_query = f"{original_query} {expanded_terms}"
+        logger.info(f"Expanded search query: {search_query[:150]}...")
+    except Exception as e:
+        logger.error(f"Query expansion failed: {e}")
+        search_query = original_query
 
     context_parts = []
     sources = []
@@ -125,7 +156,8 @@ def content_rag(state: ChatState) -> ChatState:
     
     if vector_store:
         try:
-            results = vector_store.similarity_search(query, k=5)
+            # Use k=10 for better coverage when searching for people/names
+            results = vector_store.similarity_search(search_query, k=10)
             
             for doc in results:
                 date = doc.metadata.get("date", "Unknown Date")
@@ -189,34 +221,80 @@ def insights_rag(state: ChatState) -> ChatState:
 
 
 def generate_response(state: ChatState) -> ChatState:
-    """Generate final response using LLM."""
+    """Generate final response using LLM with conversation history context."""
     logger.info(f"Generating response in {state['mode_used']} mode")
+    
+    # Build conversation history string for context
+    history_str = ""
+    messages = state.get("messages", [])
+    if len(messages) > 1:
+        # Include previous turns for context (last 6 messages max)
+        recent_history = messages[-7:-1] if len(messages) > 7 else messages[:-1]
+        history_parts = []
+        for msg in recent_history:
+            role = "User" if hasattr(msg, 'content') and isinstance(msg, HumanMessage) else "Assistant"
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            history_parts.append(f"{role}: {content}")
+        history_str = "\n".join(history_parts)
     
     system_prompt = ""
     if state["mode_used"] == "insights":
-        system_prompt = """You are an empathetic executive coach. Use the provided 'Pre-computed Insights' and email examples to answer the user's reflection.
-        Focus on behavioral patterns, improvement areas, and positive reinforcement.
-        Do not diagnose. Be constructive. If no data is available, explain that the user needs to upload their PST file first."""
-    else:
-        system_prompt = """You are a helpful email assistant. Answer the question based ONLY on the provided email context. 
-        Cite the date and sender when possible. If the answer is not in the context, say so.
-        If no email data is available, explain that the user needs to upload their PST file first."""
+        system_prompt = """You are an empathetic executive coach with excellent memory and contextual understanding.
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("system", "CONTEXT:\n{context}"),
-        ("human", "{question}")
-    ])
+**CRITICAL INSTRUCTIONS:**
+- USE THE CONVERSATION HISTORY to understand follow-up questions and pronouns (e.g., "he", "she", "they")
+- INFER full names from partial mentions: if user says "Freeman", look for "Dr. Freeman" or similar in context
+- When a partial name or reference is ambiguous, check the email context AND conversation history for matches
+- Focus on behavioral patterns, improvement areas, and positive reinforcement
+- Do not diagnose. Be constructive.
+- If no data is available, explain that the user needs to upload their PST file first."""
+    else:
+        system_prompt = """You are a smart email assistant with excellent context awareness and memory.
+
+**CRITICAL INSTRUCTIONS FOR FINDING PEOPLE:**
+- When user asks about emails "from", "to", or "about" a person, look for that name EVERYWHERE:
+  - In the sender/from field
+  - In the recipient/to field (emails starting with "Hi [Name]" or "Dear [Name]")
+  - Mentioned anywhere in the email body
+- "Emails from Dina" should also find emails TO Dina or mentioning Dina
+- INFER full names from partial mentions: "Freeman" → "Dr. Freeman", "Dina" → "Dina Cartagena"
+- If you find emails where the user wrote TO someone (e.g., "Hi Dina"), report those too!
+
+**CONTEXT AWARENESS:**
+- USE CONVERSATION HISTORY to understand follow-up questions
+- If user references "he", "she", "they" - use conversation history to determine who they mean
+- Cite the date and sender when possible
+- If the answer is not in the context, say so
+- If no email data is available, explain that the user needs to upload their PST file first."""
+
+    # Build the prompt with history if available
+    if history_str:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("system", "CONVERSATION HISTORY:\n{history}"),
+            ("system", "EMAIL CONTEXT:\n{context}"),
+            ("human", "{question}")
+        ])
+    else:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("system", "EMAIL CONTEXT:\n{context}"),
+            ("human", "{question}")
+        ])
     
     last_message = state["messages"][-1]
     question = last_message.content if hasattr(last_message, 'content') else str(last_message)
     
     chain = prompt | llm
     
-    response_msg = chain.invoke({
+    invoke_args = {
         "context": state["context_str"],
         "question": question
-    })
+    }
+    if history_str:
+        invoke_args["history"] = history_str
+    
+    response_msg = chain.invoke(invoke_args)
     
     state["response"] = response_msg.content
     return state

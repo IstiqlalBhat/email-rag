@@ -1,0 +1,6 @@
+.claude/
+.gemini/
+node_modules/
+.env
+.DS_Store
+PST/

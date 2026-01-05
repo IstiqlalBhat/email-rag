@@ -82,11 +82,16 @@ class AnalyticsService:
                 return {"dates": [], "counts": [], "error": "No data available"}
             
             # Query for a broad set of emails to analyze timeline
+            # Note: LangChain PineconeVectorStore filter may not work perfectly
+            # so we query broadly and filter locally
             results = vector_store.similarity_search(
                 query="email communication",
                 k=500,  # Get many results for meaningful timeline
-                filter={"upload_id": upload_id} if upload_id else None
             )
+            
+            # Filter by upload_id locally if provided
+            if upload_id:
+                results = [r for r in results if r.metadata.get("upload_id") == upload_id]
             
             # Group by date
             date_counts = defaultdict(int)
@@ -94,16 +99,46 @@ class AnalyticsService:
                 date_str = doc.metadata.get("date", "")
                 if date_str:
                     # Parse and normalize to just date (YYYY-MM-DD)
+                    # Handle various formats including Outlook's "Monday, September 9, 2024 9:22 AM"
                     try:
-                        # Try common date formats
-                        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"]:
+                        # Date formats to try
+                        formats = [
+                            "%A, %B %d, %Y %I:%M %p",      # Monday, September 9, 2024 9:22 AM
+                            "%A, %B %d, %Y %I:%M:%S %p",   # Monday, September 9, 2024 9:22:00 AM
+                            "%A, %B %d, %Y",               # Monday, September 9, 2024
+                            "%B %d, %Y %I:%M %p",          # September 9, 2024 9:22 AM
+                            "%B %d, %Y",                   # September 9, 2024
+                            "%Y-%m-%d %H:%M:%S",           # 2024-09-09 09:22:00
+                            "%Y-%m-%d",                    # 2024-09-09
+                            "%m/%d/%Y",                    # 09/09/2024
+                            "%d/%m/%Y",                    # 09/09/2024
+                        ]
+                        
+                        parsed = False
+                        for fmt in formats:
                             try:
-                                dt = datetime.strptime(date_str.split()[0] if " " in date_str else date_str, fmt)
+                                dt = datetime.strptime(date_str.strip()[:50], fmt)
                                 date_key = dt.strftime("%Y-%m-%d")
                                 date_counts[date_key] += 1
+                                parsed = True
                                 break
                             except ValueError:
                                 continue
+                        
+                        if not parsed:
+                            # Try extracting date with regex as fallback
+                            import re
+                            month_match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_str)
+                            if month_match:
+                                month_str = month_match.group(1)
+                                day = int(month_match.group(2))
+                                year = int(month_match.group(3))
+                                months = {"January":1,"February":2,"March":3,"April":4,"May":5,"June":6,
+                                         "July":7,"August":8,"September":9,"October":10,"November":11,"December":12}
+                                month = months.get(month_str, 1)
+                                date_key = f"{year}-{month:02d}-{day:02d}"
+                                date_counts[date_key] += 1
+                                
                     except Exception:
                         # Skip unparseable dates
                         pass
@@ -133,12 +168,15 @@ class AnalyticsService:
             if not vector_store:
                 return {"words": [], "error": "No data available"}
             
-            # Query for emails
+            # Query for emails (filter locally since LangChain filter may not work)
             results = vector_store.similarity_search(
                 query="important topics discussion",
-                k=300,
-                filter={"upload_id": upload_id} if upload_id else None
+                k=500,
             )
+            
+            # Filter by upload_id locally if provided
+            if upload_id:
+                results = [r for r in results if r.metadata.get("upload_id") == upload_id]
             
             # Extract and count words
             word_counts = Counter()
@@ -174,12 +212,15 @@ class AnalyticsService:
             if not vector_store:
                 return {"nodes": [], "edges": [], "error": "No data available"}
             
-            # Query for emails
+            # Query for emails (filter locally since LangChain filter may not work)
             results = vector_store.similarity_search(
                 query="communication conversation",
                 k=500,
-                filter={"upload_id": upload_id} if upload_id else None
             )
+            
+            # Filter by upload_id locally if provided
+            if upload_id:
+                results = [r for r in results if r.metadata.get("upload_id") == upload_id]
             
             # Build adjacency for email relationships
             # Format: {sender: {recipient: count}}

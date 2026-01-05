@@ -124,9 +124,11 @@ def index_messages(upload_id: str, force_reindex: bool = False):
             date_str = item.get("date", "")
             subject = item.get("subject", "")
             sender = item.get("from", "")
+            recipient = item.get("to", "")  # Get the To field
             email_id = item.get("email_id", hashlib.md5(content[:100].encode()).hexdigest())
-            
-            full_text = f"Date: {date_str}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
+
+            # Include To field in embedding so we can search by recipient
+            full_text = f"Date: {date_str}\nFrom: {sender}\nTo: {recipient}\nSubject: {subject}\n\n{content}"
             chunks = text_splitter.split_text(full_text)
             
             for i, chunk in enumerate(chunks):
@@ -142,6 +144,7 @@ def index_messages(upload_id: str, force_reindex: bool = False):
                     "email_id": email_id,
                     "date": date_str[:50] if date_str else "",  # Truncate long dates
                     "sender": sender[:100] if sender else "",   # Truncate long senders
+                    "to": recipient[:200] if recipient else "",  # Store recipient for search
                     "subject": subject[:200] if subject else "",  # Truncate long subjects
                     "text": chunk[:1000],  # Store chunk text for retrieval (max 1000 chars)
                     "type": "email"

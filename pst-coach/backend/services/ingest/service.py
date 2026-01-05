@@ -4,10 +4,14 @@ import uuid
 import json
 import re
 import hashlib
+import subprocess
+import email
+from email import policy
+from email.parser import BytesParser
 from datetime import datetime
+from pathlib import Path
 from fastapi import BackgroundTasks
 from loguru import logger
-from tika import parser
 from core.config import settings
 
 # In-memory cache to track indexed uploads (for MVP - use DB in production)
@@ -159,13 +163,91 @@ def get_existing_upload_ids() -> list:
     return upload_ids
 
 
+def get_email_body(msg) -> str:
+    """Extract the body from an email message, preferring plain text."""
+    body = ""
+
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition", ""))
+
+            # Skip attachments
+            if "attachment" in content_disposition:
+                continue
+
+            if content_type == "text/plain":
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        body = payload.decode(charset, errors='replace')
+                        break  # Prefer plain text
+                except Exception:
+                    continue
+            elif content_type == "text/html" and not body:
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        html_body = payload.decode(charset, errors='replace')
+                        # Simple HTML stripping
+                        body = re.sub(r'<[^>]+>', ' ', html_body)
+                        body = re.sub(r'\s+', ' ', body).strip()
+                except Exception:
+                    continue
+    else:
+        try:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or 'utf-8'
+                body = payload.decode(charset, errors='replace')
+        except Exception:
+            body = str(msg.get_payload())
+
+    return clean_body(body)
+
+
+def parse_eml_file(eml_path: str) -> dict:
+    """Parse a single .eml file and extract structured data."""
+    try:
+        with open(eml_path, 'rb') as f:
+            msg = BytesParser(policy=policy.default).parse(f)
+
+        # Extract fields
+        subject = msg.get('Subject', 'No Subject') or 'No Subject'
+        from_addr = msg.get('From', 'Unknown Sender') or 'Unknown Sender'
+        to_addr = msg.get('To', '') or ''
+        cc_addr = msg.get('Cc', '') or ''
+        date_str = msg.get('Date', '') or ''
+
+        # Get body
+        body = get_email_body(msg)
+
+        # Create unique ID
+        email_id = hashlib.md5(f"{from_addr}{subject}{body[:100]}".encode()).hexdigest()
+
+        return {
+            "subject": str(subject),
+            "from": str(from_addr),
+            "to": str(to_addr),
+            "cc": str(cc_addr),
+            "date": str(date_str),
+            "body": body,
+            "email_id": email_id
+        }
+    except Exception as e:
+        logger.error(f"Error parsing {eml_path}: {e}")
+        return None
+
+
 def process_pst_file(file_path: str, upload_id: str, force_reprocess: bool = False):
     """
-    Background task to process a PST file.
+    Background task to process a PST file using readpst.
     Extracts individual emails and indexes them.
     """
     logger.info(f"Starting processing for file: {file_path}")
-    
+
     # Check if already processed
     output_file = os.path.join(settings.EXTRACTED_DIR, f"{upload_id}.json")
     if os.path.exists(output_file) and not force_reprocess:
@@ -174,45 +256,114 @@ def process_pst_file(file_path: str, upload_id: str, force_reprocess: bool = Fal
         from services.index.service import index_messages
         index_messages(upload_id)
         return
-    
+
+    # Create temp directory for extraction
+    extract_dir = os.path.join(settings.DATA_DIR, "temp_extract", upload_id)
+    os.makedirs(extract_dir, exist_ok=True)
+
     try:
-        # Use Tika to parse the PST file
-        logger.info("Calling Tika server for PST parsing...")
-        parsed = parser.from_file(
-            file_path, 
-            serverEndpoint=settings.TIKA_SERVER_URL, 
-            requestOptions={'timeout': 3600}  # 1 hour timeout for large files
+        # Use readpst to extract emails as .eml files
+        # -e = save as .eml format
+        # -o = output directory
+        # -q = quiet
+        logger.info(f"Running readpst to extract emails from PST...")
+        result = subprocess.run(
+            ["readpst", "-e", "-o", extract_dir, file_path],
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour timeout
         )
-        
-        content = parsed.get("content", "")
-        metadata = parsed.get("metadata", {})
-        
-        logger.info(f"Tika returned {len(content)} characters of content")
-        
-        # Parse individual emails from the content
-        emails = parse_emails_from_blob(content)
-        
-        logger.info(f"Parsed {len(emails)} individual emails from PST")
-        
-        # If we got very few emails, log the metadata for debugging
+
+        if result.returncode != 0:
+            logger.error(f"readpst failed: {result.stderr}")
+            # Fall back to Tika if available
+            logger.info("Falling back to Tika parser...")
+            process_pst_with_tika(file_path, upload_id, output_file)
+            return
+
+        logger.info(f"readpst completed: {result.stdout}")
+
+        # Find all .eml files recursively
+        emails = []
+        eml_files = list(Path(extract_dir).rglob("*.eml"))
+        logger.info(f"Found {len(eml_files)} .eml files to process")
+
+        for eml_path in eml_files:
+            email_data = parse_eml_file(str(eml_path))
+            if email_data and len(email_data.get("body", "")) > 10:
+                emails.append(email_data)
+
+        logger.info(f"Successfully parsed {len(emails)} emails from PST")
+
+        # If we got very few emails, try folder parsing as fallback
         if len(emails) < 5:
-            logger.warning(f"Only {len(emails)} emails found. Metadata: {metadata}")
-        
+            logger.warning(f"Only {len(emails)} emails found. Checking for other formats...")
+            # Look for any other text files
+            for txt_file in Path(extract_dir).rglob("*"):
+                if txt_file.is_file() and txt_file.suffix not in ['.eml']:
+                    try:
+                        with open(txt_file, 'r', encoding='utf-8', errors='replace') as f:
+                            content = f.read()
+                        if len(content) > 50:
+                            parsed = parse_emails_from_blob(content)
+                            emails.extend(parsed)
+                    except Exception:
+                        continue
+
         # Ensure extracted directory exists
         os.makedirs(settings.EXTRACTED_DIR, exist_ok=True)
-        
+
         # Write to JSON
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(emails, f, indent=2, ensure_ascii=False)
-            
+
         logger.info(f"Extraction complete for {upload_id}. Saved {len(emails)} emails to {output_file}")
 
         # Trigger Indexing
         from services.index.service import index_messages
         index_messages(upload_id)
 
+    except subprocess.TimeoutExpired:
+        logger.error("readpst timed out after 1 hour")
+    except FileNotFoundError:
+        logger.error("readpst not found. Install pst-utils package.")
+        # Fall back to Tika
+        process_pst_with_tika(file_path, upload_id, output_file)
     except Exception as e:
         logger.exception(f"Error processing file {file_path}: {e}")
+    finally:
+        # Clean up temp directory
+        try:
+            shutil.rmtree(extract_dir)
+        except Exception:
+            pass
+
+
+def process_pst_with_tika(file_path: str, upload_id: str, output_file: str):
+    """Fallback to Tika for PST parsing (less reliable)."""
+    try:
+        from tika import parser
+        logger.info("Using Tika fallback for PST parsing...")
+        parsed = parser.from_file(
+            file_path,
+            serverEndpoint=settings.TIKA_SERVER_URL,
+            requestOptions={'timeout': 3600}
+        )
+
+        content = parsed.get("content", "")
+        logger.info(f"Tika returned {len(content)} characters")
+
+        emails = parse_emails_from_blob(content)
+        logger.info(f"Parsed {len(emails)} emails via Tika")
+
+        os.makedirs(settings.EXTRACTED_DIR, exist_ok=True)
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(emails, f, indent=2, ensure_ascii=False)
+
+        from services.index.service import index_messages
+        index_messages(upload_id)
+    except Exception as e:
+        logger.exception(f"Tika fallback failed: {e}")
 
 
 async def handle_upload(file, background_tasks: BackgroundTasks):

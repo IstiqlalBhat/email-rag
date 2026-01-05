@@ -162,10 +162,13 @@ Search terms:"""
             for doc in results:
                 date = doc.metadata.get("date", "Unknown Date")
                 sender = doc.metadata.get("sender", "Unknown Sender")
+                recipient = doc.metadata.get("to", "")
                 subject = doc.metadata.get("subject", "No Subject")
-                
-                context_parts.append(f"Date: {date}\nFrom: {sender}\nSubject: {subject}\nContent: {doc.page_content}")
-                sources.append({"date": date, "from": sender, "subject": subject})
+
+                # Include To field in context for better search results
+                to_line = f"\nTo: {recipient}" if recipient else ""
+                context_parts.append(f"Date: {date}\nFrom: {sender}{to_line}\nSubject: {subject}\nContent: {doc.page_content}")
+                sources.append({"date": date, "from": sender, "to": recipient, "subject": subject})
         except Exception as e:
             logger.error(f"Error searching Pinecone: {e}")
             context_parts.append("No email data available yet. Please upload a PST file first.")

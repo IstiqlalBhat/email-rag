@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import LiquidButton from '@/components/ui/LiquidButton'
 import VisualizationPanel from '@/components/visualizations/VisualizationPanel'
+import GraphRAGPanel from '@/components/visualizations/GraphRAGPanel'
 import {
   Send,
   ArrowLeft,
@@ -16,7 +17,8 @@ import {
   Calendar,
   Mail,
   Quote,
-  BarChart3
+  BarChart3,
+  Network
 } from 'lucide-react'
 import api from '@/lib/api'
 
@@ -46,7 +48,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [activeMode, setActiveMode] = useState<'ask' | 'coach' | 'explore'>('coach')
+  const [activeMode, setActiveMode] = useState<'ask' | 'coach' | 'explore' | 'graph'>('coach')
   const [uploadId, setUploadId] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -141,7 +143,7 @@ export default function ChatPage() {
       const response = await api.post('/api/chat/router', {
         messages: fullHistory,
         upload_id: uploadId,
-        mode: activeMode === 'coach' ? 'insights' : 'content',
+        mode: activeMode === 'coach' ? 'insights' : activeMode === 'graph' ? 'graph' : 'content',
       })
 
       const assistantMessage: Message = {
@@ -219,6 +221,16 @@ export default function ChatPage() {
               <BarChart3 className="w-4 h-4" />
               Explore
             </button>
+            <button
+              onClick={() => setActiveMode('graph')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${activeMode === 'graph'
+                ? 'bg-purple-600 text-white shadow-md'
+                : 'text-mineral-500 hover:text-purple-700 hover:bg-purple-50'
+                }`}
+            >
+              <Network className="w-4 h-4" />
+              Graph
+            </button>
           </div>
         </div>
       </header>
@@ -252,6 +264,61 @@ export default function ChatPage() {
               ) : (
                 <div className="text-center py-16 bg-white/40 rounded-2xl">
                   <p className="text-mineral-500">Upload a PST file first to see visualizations</p>
+                </div>
+              )}
+            </div>
+          ) : activeMode === 'graph' ? (
+            // Graph Mode - Knowledge Graph
+            <div className="space-y-6">
+              <div className="text-center space-y-3 mb-8">
+                <h2 className="text-3xl font-serif font-medium text-mineral-900">
+                  Knowledge Graph
+                </h2>
+                <p className="text-mineral-600">
+                  Build and query a knowledge graph for deeper insights
+                </p>
+              </div>
+              {uploadId ? (
+                <div className="grid md:grid-cols-2 gap-6">
+                  <GraphRAGPanel
+                    uploadId={uploadId}
+                    onQueryClick={(query) => {
+                      setInput(query)
+                      handleSend(query)
+                    }}
+                  />
+                  {/* Messages area for graph mode */}
+                  <div className="bg-white/60 rounded-2xl p-6 border border-white/80 shadow-sm min-h-[400px]">
+                    <h3 className="font-semibold text-mineral-900 mb-4">Graph Query Results</h3>
+                    {messages.length === 0 ? (
+                      <div className="text-center py-12 text-mineral-400">
+                        <Network className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>Build the graph and ask questions to see results here</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 max-h-[500px] overflow-y-auto">
+                        {messages.filter(m => m.role === 'assistant').slice(-3).map((message) => (
+                          <div key={message.id} className="bg-mineral-50 rounded-lg p-4">
+                            <p className="text-mineral-800 text-sm whitespace-pre-wrap">{message.content}</p>
+                            {message.citations && message.citations.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-mineral-200">
+                                <p className="text-xs text-mineral-400 mb-2">Sources:</p>
+                                {message.citations.slice(0, 3).map((c, i) => (
+                                  <p key={i} className="text-xs text-mineral-500 truncate">
+                                    {c.sender} - {c.subject}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-16 bg-white/40 rounded-2xl">
+                  <p className="text-mineral-500">Upload a PST file first to build a knowledge graph</p>
                 </div>
               )}
             </div>
@@ -363,6 +430,11 @@ export default function ChatPage() {
                                 <Sparkles className="w-3 h-3 text-terra-500" />
                                 Coaching Insight
                               </>
+                            ) : message.mode === 'graph' ? (
+                              <>
+                                <Network className="w-3 h-3 text-purple-500" />
+                                Graph RAG
+                              </>
                             ) : (
                               <>
                                 <MessageCircle className="w-3 h-3 text-mineral-600" />
@@ -404,8 +476,8 @@ export default function ChatPage() {
         </div>
       </main>
 
-      {/* Input Area - Hidden in Explore mode */}
-      {activeMode !== 'explore' && (
+      {/* Input Area - Hidden in Explore and Graph modes */}
+      {activeMode !== 'explore' && activeMode !== 'graph' && (
         <footer className="border-t border-mineral-200 bg-white/80 backdrop-blur-xl sticky bottom-0 z-50">
           <div className="max-w-4xl mx-auto px-4 py-6">
             <div className="relative shadow-lg rounded-2xl bg-white transition-shadow hover:shadow-xl">

@@ -1,880 +1,940 @@
-# PST Coach
+# PST Coach - Email Intelligence & Self-Reflection Platform
 
-An AI-powered email intelligence platform that analyzes your Outlook PST files to provide personalized communication coaching and insights.
-
-## Features
-
-- **📧 PST File Processing**: Upload Outlook PST files for analysis
-- **🔍 Ask Inbox**: Search your emails using natural language
-- **🎯 Coach Me**: Get personalized coaching insights about your communication patterns
-- **🧠 AI-Powered**: Uses Claude Sonnet for intelligent analysis
-- **📊 Pattern Analysis**: Identifies behavioral patterns, mood trends, and areas for improvement
-- **🔄 Smart Deduplication**: Automatically detects and skips duplicate PST uploads
-- **⚡ Incremental Processing**: Redundancy checks prevent re-processing already indexed files
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Backend** | FastAPI, Python 3.11 |
-| **Frontend** | Next.js 14, React, TypeScript |
-| **Vector DB** | Pinecone (Serverless) |
-| **LLM** | Claude 3.5 Sonnet (Anthropic) |
-| **Embeddings** | HuggingFace (all-MiniLM-L6-v2) |
-| **PST Parsing** | Apache Tika |
-| **Orchestration** | LangGraph |
-| **Database** | PostgreSQL 15 |
-| **Cache** | Redis 7 |
-| **Container** | Docker Compose |
+An AI-powered email intelligence platform that analyzes Outlook PST files to provide personalized communication coaching, semantic search, and graph-based knowledge discovery.
 
 ## Table of Contents
 
-- [Quick Start (Docker)](#quick-start-docker)
-- [Manual Setup (Without Docker)](#manual-setup-without-docker)
+- [Features](#features)
+- [Architecture Overview](#architecture-overview)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [Detailed Architecture](#detailed-architecture)
 - [How It Works](#how-it-works)
-- [Architecture](#architecture)
 - [Configuration](#configuration)
-- [API Reference](#api-endpoints)
+- [API Reference](#api-reference)
+- [Development](#development)
 - [Troubleshooting](#troubleshooting)
 
-## Quick Start (Docker)
+---
+
+## Features
+
+### Core Capabilities
+
+- **PST File Processing**: Upload and parse Outlook PST files using Apache Tika
+- **Smart Deduplication**: Automatic detection of duplicate uploads via MD5 hashing
+- **Three RAG Modes**:
+  - **Ask Inbox**: Natural language semantic search across your emails
+  - **Coach Me**: Personalized coaching insights about communication patterns
+  - **Graph RAG**: Knowledge graph-based retrieval with entity relationships
+- **Explore Mode**: Interactive visualizations of email patterns and analytics
+- **AI-Powered Analysis**: Uses Claude Sonnet 4.5 for intelligent insights
+- **Privacy-First**: All processing happens locally or in your cloud instances
+
+### Advanced Features
+
+- **Query Expansion**: Automatically expands queries for better search results
+- **Conversation Context**: Maintains chat history for follow-up questions
+- **Multi-Hop Reasoning**: Graph traversal for complex queries
+- **Incremental Processing**: Redundancy checks prevent re-processing
+- **Source Attribution**: Every response includes source citations
+
+---
+
+## Architecture Overview
+
+PST Coach is built on a modern microservices architecture with three primary layers:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         PRESENTATION LAYER                           │
+│                         (Next.js Frontend)                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────────┐   │
+│  │  Upload  │  │   Chat   │  │ Explore  │  │  Visualizations │   │
+│  │   Page   │  │   Page   │  │   Mode   │  │  (Graph/Charts) │   │
+│  └──────────┘  └──────────┘  └──────────┘  └─────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                               │ HTTP/REST
+┌─────────────────────────────────────────────────────────────────────┐
+│                         APPLICATION LAYER                            │
+│                         (FastAPI Backend)                            │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │                      API Routes Layer                           │ │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────────────┐     │ │
+│  │  │ Uploads │  │  Chat   │  │Analytics│  │  Graph RAG   │     │ │
+│  │  └─────────┘  └─────────┘  └─────────┘  └──────────────┘     │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │                   Middleware Layer                              │ │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐    │ │
+│  │  │ Error Handle │  │  Request ID  │  │  CORS / GZip     │    │ │
+│  │  └──────────────┘  └──────────────┘  └──────────────────┘    │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │                   Orchestration Layer                           │ │
+│  │  ┌──────────────────────────────────────────────────────────┐ │ │
+│  │  │              LangGraph Chat Router                        │ │ │
+│  │  │  ┌────────────┐  ┌────────────┐  ┌─────────────────┐   │ │ │
+│  │  │  │  Classify  │→ │ Content    │→ │   Generate      │   │ │ │
+│  │  │  │  Intent    │  │ RAG        │  │   Response      │   │ │ │
+│  │  │  └────────────┘  └────────────┘  └─────────────────┘   │ │ │
+│  │  │                     ↓                                    │ │ │
+│  │  │                  ┌────────────┐                          │ │ │
+│  │  │                  │ Insights   │                          │ │ │
+│  │  │                  │ RAG        │                          │ │ │
+│  │  │                  └────────────┘                          │ │ │
+│  │  └──────────────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │                      Service Layer                              │ │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌─────────┐ │ │
+│  │  │  Ingest    │  │   Index    │  │  Insights  │  │  Graph  │ │ │
+│  │  │  Service   │  │  Service   │  │  Processor │  │  RAG    │ │ │
+│  │  └────────────┘  └────────────┘  └────────────┘  └─────────┘ │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                               │
+┌─────────────────────────────────────────────────────────────────────┐
+│                         DATA & AI LAYER                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │PostgreSQL│  │  Redis   │  │ Pinecone │  │  Claude API      │   │
+│  │(Metadata)│  │ (Cache)  │  │(Vectors) │  │  (Anthropic)     │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘   │
+│  ┌──────────┐  ┌──────────────────────────────────────────────┐   │
+│  │  Tika    │  │        HuggingFace Embeddings                │   │
+│  │ (Parser) │  │     (sentence-transformers/all-MiniLM-L6-v2) │   │
+│  └──────────┘  └──────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Tech Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Frontend Framework** | Next.js 14 (React, TypeScript) | Server-side rendering, routing |
+| **UI Library** | Tailwind CSS, Lucide Icons | Responsive design, icons |
+| **Backend Framework** | FastAPI (Python 3.11) | REST API, async support |
+| **AI Orchestration** | LangGraph, LangChain | Workflow orchestration, RAG chains |
+| **LLM** | Claude Sonnet 4.5 (Anthropic) | Text generation, analysis |
+| **Embeddings** | HuggingFace all-MiniLM-L6-v2 | 384-dim local embeddings |
+| **Vector Database** | Pinecone (Serverless) | Semantic search, similarity |
+| **Document Parser** | Apache Tika 3.0 | PST file extraction |
+| **Graph Engine** | NetworkX, FAISS | Knowledge graph, local vectors |
+| **Metadata DB** | PostgreSQL 15 | Structured data storage |
+| **Cache** | Redis 7 | Session cache, rate limiting |
+| **Containerization** | Docker Compose | Multi-container orchestration |
+| **Validation** | Pydantic v2 | Schema validation |
+| **Text Processing** | spaCy, NLTK | NER, text analysis |
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- **Docker Desktop** (Windows/Mac) or Docker Engine (Linux)
-- **Pinecone API Key** - Sign up at [pinecone.io](https://www.pinecone.io/) (free tier available)
-- **Anthropic API Key** - Get yours at [console.anthropic.com](https://console.anthropic.com/)
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Pinecone API Key ([get free tier](https://www.pinecone.io/))
+- Anthropic API Key ([get from console](https://console.anthropic.com/))
 
-### Setup Steps
+### Installation
 
-1. **Clone the repository**:
+1. **Clone and navigate**:
    ```bash
    git clone <your-repo-url>
    cd RAG-personal/pst-coach
    ```
 
-2. **Configure environment variables**:
+2. **Configure environment**:
    ```bash
-   # Backend configuration
+   # Backend
    cp backend/env.example backend/.env
 
-   # Frontend configuration
+   # Frontend
    cp frontend/env.local.example frontend/.env.local
    ```
 
-3. **Edit `backend/.env` with your API keys**:
+3. **Add API keys to `backend/.env`**:
    ```bash
-   # Required: Add your API keys
-   PINECONE_API_KEY=your-pinecone-api-key-here
-   ANTHROPIC_API_KEY=your-anthropic-api-key-here
-
-   # Optional: Customize these if needed
-   PINECONE_INDEX_NAME=pst-coach
-   LLM_MODEL=claude-3-5-sonnet-20241022
+   PINECONE_API_KEY=your-pinecone-key
+   ANTHROPIC_API_KEY=your-anthropic-key
    ```
 
-4. **Start Docker Desktop** (Windows/Mac):
-   - Launch Docker Desktop application
-   - Wait for it to fully start (whale icon should be steady in system tray)
-
-5. **Start all services**:
+4. **Start services**:
    ```bash
    docker-compose up -d
    ```
 
-6. **Verify containers are running**:
+5. **Verify deployment**:
    ```bash
    docker-compose ps
    ```
 
-   You should see 6 containers running:
-   - `pst-coach-frontend` - Next.js frontend (port 3001)
-   - `pst-coach-backend` - FastAPI backend (port 8000)
-   - `pst-coach-tika` - Apache Tika for PST parsing (port 9998)
-   - `pst-coach-postgres` - PostgreSQL database (port 5433)
-   - `pst-coach-redis` - Redis cache (port 6379)
-   - `pst-coach-qdrant` - Qdrant vector DB (port 6333-6334, currently unused)
+   All 6 containers should be running:
+   - `pst-coach-frontend` (port 3001)
+   - `pst-coach-backend` (port 8000)
+   - `pst-coach-postgres` (port 5433)
+   - `pst-coach-redis` (port 6379)
+   - `pst-coach-tika` (port 9998)
+   - `pst-coach-qdrant` (port 6333-6334)
 
-7. **Access the application**:
-   - **Frontend UI**: http://localhost:3001
-   - **Backend API**: http://localhost:8000
-   - **API Documentation**: http://localhost:8000/docs
-   - **Health Check**: http://localhost:8000/health
+6. **Access application**:
+   - Frontend UI: http://localhost:3001
+   - API Docs: http://localhost:8000/docs
+   - Health Check: http://localhost:8000/health
 
-### First Time Usage
+### First Upload
 
-1. Navigate to http://localhost:3001/upload
-2. Upload your Outlook PST file (supports files up to 5GB)
-3. Wait for processing (check logs with `docker logs pst-coach-backend -f`)
-4. Once complete, go to http://localhost:3001/chat
-5. Try asking questions about your emails or request coaching insights
+1. Go to http://localhost:3001/upload
+2. Upload your PST file (max 5GB)
+3. Monitor processing: `docker logs pst-coach-backend -f`
+4. Once complete, navigate to Chat page
+5. Try queries like:
+   - "Show me emails from last month"
+   - "What patterns do you see in my communication?"
+   - "How do I handle urgent requests?"
 
-## Manual Setup (Without Docker)
+---
 
-### Prerequisites
+## Detailed Architecture
 
-- **Python 3.11+**
-- **Node.js 18+** and npm
-- **Java 11+** (for Apache Tika)
-- **PostgreSQL 15+**
-- **Redis 7+**
-- **Pinecone API Key**
-- **Anthropic API Key**
-
-### Backend Setup
-
-1. **Navigate to backend directory**:
-   ```bash
-   cd pst-coach/backend
-   ```
-
-2. **Create virtual environment**:
-   ```bash
-   python -m venv venv
-
-   # Windows
-   venv\Scripts\activate
-
-   # Linux/Mac
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Setup PostgreSQL**:
-   ```bash
-   # Create database
-   createdb pst_coach
-
-   # Or using psql:
-   psql -U postgres
-   CREATE DATABASE pst_coach;
-   CREATE USER pstcoach WITH PASSWORD 'changeme123';
-   GRANT ALL PRIVILEGES ON DATABASE pst_coach TO pstcoach;
-   ```
-
-5. **Start Redis** (in separate terminal):
-   ```bash
-   redis-server
-   ```
-
-6. **Download and start Apache Tika**:
-   ```bash
-   # Download Tika server
-   wget https://dlcdn.apache.org/tika/3.0.0/tika-server-standard-3.0.0.jar
-
-   # Start Tika server (in separate terminal)
-   java -jar tika-server-standard-3.0.0.jar
-   ```
-
-7. **Configure environment**:
-   ```bash
-   cp env.example .env
-   # Edit .env with your settings:
-   # - Update PINECONE_API_KEY and ANTHROPIC_API_KEY
-   # - Update DATABASE_URL if needed
-   # - Update TIKA_SERVER_URL=http://localhost:9998
-   ```
-
-8. **Create data directories**:
-   ```bash
-   mkdir -p data/uploads data/extracted data/insights
-   ```
-
-9. **Start the backend**:
-   ```bash
-   uvicorn api.main:app --reload --port 8000
-   ```
-
-### Frontend Setup
-
-1. **Navigate to frontend directory** (new terminal):
-   ```bash
-   cd pst-coach/frontend
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment**:
-   ```bash
-   cp env.local.example .env.local
-   # Edit .env.local:
-   # NEXT_PUBLIC_API_URL=http://localhost:8000
-   ```
-
-4. **Start the development server**:
-   ```bash
-   npm run dev
-   ```
-
-5. **Access the application**:
-   - Frontend: http://localhost:3000
-   - Backend: http://localhost:8000
-
-### Manual Setup Summary
-
-After completing these steps, you should have:
-- ✅ PostgreSQL running on port 5432
-- ✅ Redis running on port 6379
-- ✅ Apache Tika running on port 9998
-- ✅ FastAPI backend on port 8000
-- ✅ Next.js frontend on port 3000
-
-## Project Structure
+### 1. Frontend Architecture (Next.js)
 
 ```
-pst-coach/
-├── backend/                 # FastAPI backend
-│   ├── api/                 # API routes and middleware
-│   │   ├── routes/          # uploads.py, chat.py
-│   │   └── middleware/      # error handling, request ID
-│   ├── core/                # Configuration and logging
-│   ├── graph/               # LangGraph chat workflow
-│   ├── models/              # Database models (minimal)
-│   └── services/            # Business logic
-│       ├── ingest/          # PST parsing with Tika
-│       ├── index/           # Pinecone indexing
-│       └── insights/        # AI insights generation
-├── frontend/                # Next.js frontend
-│   └── src/
-│       ├── app/             # Pages (chat, upload, etc.)
-│       ├── components/      # UI components
-│       └── lib/             # API client
-└── docker-compose.yml       # Container orchestration
+frontend/
+├── src/
+│   ├── app/                          # Next.js App Router
+│   │   ├── page.tsx                  # Landing page
+│   │   ├── chat/page.tsx             # Multi-mode chat interface
+│   │   ├── upload/page.tsx           # PST upload interface
+│   │   └── dashboard/page.tsx        # Analytics dashboard
+│   ├── components/
+│   │   ├── ui/                       # Reusable UI components
+│   │   │   └── LiquidButton.tsx      # Animated button
+│   │   └── visualizations/           # Data visualization components
+│   │       ├── VisualizationPanel.tsx    # Charts and graphs
+│   │       └── GraphRAGPanel.tsx         # Knowledge graph UI
+│   └── lib/
+│       └── api.ts                    # Axios HTTP client
+└── public/                           # Static assets
 ```
 
-## Configuration
+**Key Frontend Features**:
 
-### Backend Environment Variables
+- **Mode Switching**: Toggle between Ask, Coach, Explore, and Graph modes
+- **Conversation History**: Maintains chat context for follow-up questions
+- **Source Citations**: Displays email metadata for each response
+- **Upload Management**: Drag-and-drop PST upload with progress tracking
+- **Visualizations**: Interactive charts for email patterns and trends
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PINECONE_API_KEY` | Pinecone API key | Required |
-| `ANTHROPIC_API_KEY` | Anthropic API key | Required |
-| `LLM_MODEL` | Claude model name | claude-sonnet-4-5 |
-| `TIKA_SERVER_URL` | Tika server URL | http://tika:9998 |
-| `DEBUG` | Enable debug mode | true |
+### 2. Backend Architecture (FastAPI)
 
-### Frontend Environment Variables
+```
+backend/
+├── api/
+│   ├── main.py                       # FastAPI app entry point
+│   ├── routes/                       # API endpoint handlers
+│   │   ├── uploads.py                # POST /api/uploads (upload PST)
+│   │   ├── chat.py                   # POST /api/chat/router (RAG queries)
+│   │   ├── analytics.py              # GET /api/analytics/* (metrics)
+│   │   └── graph_rag.py              # POST /api/graph/* (graph ops)
+│   └── middleware/
+│       ├── error_handler.py          # Global error handling
+│       └── request_id.py             # Request tracking
+├── core/
+│   ├── config.py                     # Pydantic settings
+│   └── logging.py                    # Loguru setup
+├── graph/
+│   └── chat_graph.py                 # LangGraph workflow
+├── models/                           # SQLAlchemy models (future)
+└── services/                         # Business logic layer
+    ├── ingest/
+    │   └── service.py                # PST parsing & extraction
+    ├── index/
+    │   └── service.py                # Vector embedding & Pinecone
+    ├── insights/
+    │   └── processor.py              # AI coaching insights
+    └── graph_rag/
+        ├── service.py                # Graph RAG orchestration
+        ├── knowledge_graph.py        # NetworkX graph builder
+        ├── query_engine.py           # Graph traversal & query
+        └── models.py                 # Pydantic schemas
+```
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_API_URL` | Backend API URL | http://localhost:8000 |
+### 3. LangGraph Chat Router
+
+The system uses LangGraph to orchestrate different RAG modes based on query intent:
+
+```python
+# Simplified workflow from backend/graph/chat_graph.py
+
+ChatState = TypedDict({
+    "messages": list,           # Conversation history
+    "upload_id": str,           # Active PST context
+    "intent": str,              # "factual" | "reflective"
+    "mode_used": str,           # "content" | "insights" | "graph"
+    "context_str": str,         # Retrieved context
+    "sources": list,            # Source attribution
+    "response": str             # Final answer
+})
+
+Workflow:
+1. classify_intent(state)       # Classify user query
+2. route_to_mode(state)         # Route to appropriate RAG
+   ├─> content_rag(state)       # Vector search in Pinecone
+   ├─> insights_rag(state)      # Load pre-computed insights
+   └─> graph_rag(state)         # Graph traversal (future)
+3. generate_response(state)     # Generate answer with Claude
+```
+
+**Intent Classification**:
+- **Factual** (→ Content RAG): "Show me emails from Dina", "What did John say about the project?"
+- **Reflective** (→ Insights RAG): "How do I handle stress?", "What patterns in my communication?"
+
+### 4. Service Layer Architecture
+
+#### 4.1 Ingest Service (`services/ingest/service.py`)
+
+**Responsibilities**:
+- Accept PST file uploads
+- Detect duplicate uploads via MD5 hashing
+- Parse PST files using Apache Tika
+- Extract individual emails with metadata
+- Save to JSON format
+
+**Key Functions**:
+```python
+handle_upload(file, background_tasks)
+    ├─> check_if_already_indexed(upload_id)
+    ├─> generate upload_id = f"{file_hash}-{uuid}"
+    └─> background_tasks.add_task(process_pst_file)
+
+process_pst_file(file_path, upload_id)
+    ├─> call Apache Tika API
+    ├─> parse_emails_from_blob(content)
+    ├─> save to data/extracted/{upload_id}.json
+    └─> trigger index_messages(upload_id)
+```
+
+**Email Parsing Strategy**:
+1. Pattern matching on headers (`From:`, `Subject:`, `Date:`)
+2. Body extraction with HTML stripping
+3. Email deduplication via `email_id` hash
+4. Fallback to chunking if no headers found
+
+#### 4.2 Index Service (`services/index/service.py`)
+
+**Responsibilities**:
+- Chunk emails into smaller segments
+- Generate embeddings using HuggingFace
+- Upsert vectors to Pinecone
+- Track indexed uploads to prevent re-indexing
+- Trigger insights generation
+
+**Key Functions**:
+```python
+index_messages(upload_id, force_reindex=False)
+    ├─> check if already indexed
+    ├─> ensure_pinecone_index()
+    ├─> load emails from data/extracted/{upload_id}.json
+    ├─> split text (chunk_size=500, overlap=50)
+    ├─> embed chunks (HuggingFace all-MiniLM-L6-v2)
+    ├─> upsert to Pinecone (batch_size=100)
+    ├─> mark_upload_indexed(upload_id, vector_count)
+    └─> trigger generate_insights(upload_id)
+```
+
+**Vector Schema**:
+```python
+{
+    "id": f"{upload_id}_{email_id}_{chunk_index}",
+    "values": [0.123, -0.456, ...],  # 384-dim embedding
+    "metadata": {
+        "upload_id": "abc123-xyz",
+        "email_id": "def456",
+        "date": "2024-01-15 10:30:00",
+        "sender": "john@example.com",
+        "to": "team@example.com",
+        "subject": "Project Update",
+        "text": "Email chunk text...",
+        "type": "email"
+    }
+}
+```
+
+#### 4.3 Insights Processor (`services/insights/processor.py`)
+
+**Responsibilities**:
+- Analyze user's communication patterns
+- Identify behavioral trends
+- Generate coaching recommendations
+- Save insights to JSON
+
+**Key Functions**:
+```python
+generate_insights(upload_id)
+    ├─> load emails from data/extracted/{upload_id}.json
+    ├─> identify_user_email(emails)  # Most frequent sender
+    ├─> filter emails FROM user (max 50 samples)
+    ├─> send to Claude with coaching prompt
+    ├─> parse structured JSON response
+    └─> save to data/insights/{upload_id}_insights.json
+```
+
+**Insights Schema**:
+```json
+{
+    "summary": "Executive summary...",
+    "behavioral_patterns": ["Pattern 1", "Pattern 2"],
+    "communication_style": "Direct and concise...",
+    "mood_trends": "Generally positive...",
+    "strengths": ["Strong follow-up", "Clear subject lines"],
+    "areas_for_improvement": ["Response time", "After-hours emails"],
+    "coaching_tips": ["Tip 1", "Tip 2"]
+}
+```
+
+#### 4.4 Graph RAG Service (`services/graph_rag/`)
+
+**Responsibilities**:
+- Build knowledge graphs from emails
+- Extract entities and relationships
+- Perform graph traversal for queries
+- Visualize graph structure
+
+**Components**:
+
+**4.4.1 Knowledge Graph Builder** (`knowledge_graph.py`):
+```python
+KnowledgeGraph.build_graph(documents, llm, embeddings)
+    ├─> extract_concepts(doc)        # Use LLM to extract entities
+    ├─> compute_similarity(concepts) # Cosine similarity
+    ├─> add_edges(threshold=0.7)     # Connect similar concepts
+    └─> persist to NetworkX graph
+
+Graph Structure:
+    Nodes: {
+        "id": concept_index,
+        "content": "Entity or concept text",
+        "embedding": [0.1, -0.2, ...]
+    }
+    Edges: {
+        "weight": similarity_score  # 0.0 - 1.0
+    }
+```
+
+**4.4.2 Query Engine** (`query_engine.py`):
+```python
+GraphQueryEngine.query(query_str)
+    ├─> retrieve_top_k_nodes(query)  # Vector search in FAISS
+    ├─> traverse_graph(start_nodes)  # Multi-hop traversal
+    ├─> filter_content(traversed_nodes)
+    ├─> generate_answer(llm, filtered_context)
+    └─> return GraphQueryResult(answer, traversal_path)
+```
+
+**Graph Traversal Algorithm**:
+1. Start from top-k most relevant nodes (vector search)
+2. Traverse to neighbors based on edge weights
+3. Limit traversal depth (max_steps=10)
+4. Collect context from visited nodes
+5. Rank by relevance and recency
+
+### 5. Data Storage Architecture
+
+```
+data/
+├── uploads/                          # Original PST files
+│   └── {upload_id}.pst
+├── extracted/                        # Parsed emails (JSON)
+│   └── {upload_id}.json
+├── insights/                         # AI-generated insights
+│   └── {upload_id}_insights.json
+├── graphs/                           # Persisted knowledge graphs
+│   ├── {upload_id}_graph.pkl        # NetworkX graph (pickled)
+│   └── {upload_id}_vectors/         # FAISS vector store
+└── indexed_uploads.json              # Tracking file for indexed uploads
+```
+
+### 6. RAG Modes Comparison
+
+| Feature | Content RAG | Insights RAG | Graph RAG |
+|---------|-------------|--------------|-----------|
+| **Query Type** | Factual search | Coaching questions | Complex reasoning |
+| **Data Source** | Pinecone vectors | Pre-computed insights | Knowledge graph |
+| **Retrieval** | Similarity search | JSON lookup + vectors | Graph traversal |
+| **Context** | Top-K email chunks | Insights + examples | Multi-hop entities |
+| **Use Case** | "Emails from John" | "Communication patterns" | "How are X and Y related?" |
+| **Latency** | ~2-3 sec | ~1-2 sec | ~5-8 sec |
+| **Accuracy** | High for exact matches | High for patterns | High for relationships |
+
+---
 
 ## How It Works
 
-PST Coach uses a multi-stage pipeline to transform your Outlook PST files into actionable insights:
+### End-to-End Flow
 
-### 1. Upload & Deduplication
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. UPLOAD & DEDUPLICATION                                           │
+└─────────────────────────────────────────────────────────────────────┘
+    User uploads PST
+         ↓
+    Calculate MD5 hash
+         ↓
+    Check if already processed  ────→ [YES] Return existing upload_id
+         ↓ [NO]
+    Save to data/uploads/{upload_id}.pst
+         ↓
+    Start background processing
 
-**What happens:**
-- User uploads a PST file via the frontend upload interface
-- System calculates MD5 hash of the file content
-- Checks against previously uploaded files to detect duplicates
-- If duplicate detected, returns existing `upload_id` and skips processing
-- If new, generates unique `upload_id` (format: `{file_hash}-{uuid}`)
-- Saves PST file to `data/uploads/{upload_id}.pst`
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. PST PARSING (Apache Tika)                                        │
+└─────────────────────────────────────────────────────────────────────┘
+    Check if data/extracted/{upload_id}.json exists ─→ [YES] Skip
+         ↓ [NO]
+    Send PST to Tika server (HTTP POST)
+         ↓
+    Tika extracts raw text
+         ↓
+    Parse emails using regex patterns
+         ├─> Extract headers (From, To, Subject, Date)
+         ├─> Extract body content
+         └─> Clean and format text
+         ↓
+    Generate email_id for each (MD5 hash)
+         ↓
+    Save to data/extracted/{upload_id}.json
 
-**Files involved:**
-- `backend/services/ingest/service.py:handle_upload()` - Main upload handler
-- `backend/services/ingest/service.py:get_existing_upload_ids()` - Deduplication check
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. VECTOR EMBEDDING (HuggingFace + Pinecone)                       │
+└─────────────────────────────────────────────────────────────────────┘
+    Check indexed_uploads.json ────→ [EXISTS] Skip indexing
+         ↓ [NOT INDEXED]
+    Load emails from JSON
+         ↓
+    For each email:
+         ├─> Create full text (headers + body)
+         ├─> Split into chunks (500 chars, 50 overlap)
+         ├─> Generate embedding (all-MiniLM-L6-v2)
+         └─> Create vector_id = {upload_id}_{email_id}_{chunk}
+         ↓
+    Batch upsert to Pinecone (100 vectors/batch)
+         ↓
+    Mark upload as indexed in indexed_uploads.json
 
-**Redundancy check:** MD5 hash comparison prevents duplicate uploads
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. INSIGHTS GENERATION (Claude Sonnet)                             │
+└─────────────────────────────────────────────────────────────────────┘
+    Load emails from JSON
+         ↓
+    Identify user email (most frequent sender)
+         ↓
+    Filter emails FROM user (max 50)
+         ↓
+    Send to Claude with coaching prompt
+         ↓
+    Parse structured JSON response
+         ↓
+    Save to data/insights/{upload_id}_insights.json
 
-### 2. PST Parsing with Apache Tika
+┌─────────────────────────────────────────────────────────────────────┐
+│ 5. KNOWLEDGE GRAPH BUILDING (Optional)                             │
+└─────────────────────────────────────────────────────────────────────┘
+    User clicks "Build Graph"
+         ↓
+    Load extracted emails
+         ↓
+    Split into chunks
+         ↓
+    For each chunk:
+         ├─> Extract concepts/entities (Claude)
+         ├─> Generate embeddings
+         └─> Create node in graph
+         ↓
+    Compute pairwise similarity
+         ↓
+    Add edges where similarity > threshold (0.7)
+         ↓
+    Persist graph (NetworkX → pickle)
+         ↓
+    Save local vectors (FAISS)
 
-**What happens:**
-- Background task starts processing the PST file
-- Checks if extraction already exists (redundancy check)
-- Sends PST file to Apache Tika server for parsing
-- Tika extracts raw text content from the PST container
-- Parser identifies individual emails using header patterns:
-  - `From:`, `Sent:`, `To:`, `Subject:` headers
-  - Email body content
-  - Metadata (dates, recipients)
-- Each email gets unique `email_id` (MD5 hash of sender + subject + body snippet)
-- Cleans email bodies (removes formatting, collapse whitespace)
-- Saves extracted emails to `data/extracted/{upload_id}.json`
+┌─────────────────────────────────────────────────────────────────────┐
+│ 6. QUERY PROCESSING (LangGraph Router)                             │
+└─────────────────────────────────────────────────────────────────────┘
+    User enters query
+         ↓
+    LangGraph: classify_intent(query)
+         ├─> "factual" → route to Content RAG
+         └─> "reflective" → route to Insights RAG
+         ↓
+    Content RAG:
+         ├─> Query expansion (Claude)
+         ├─> Embed query (HuggingFace)
+         ├─> Similarity search (Pinecone, k=10)
+         ├─> Retrieve email chunks
+         └─> Send to Claude with context
+         ↓
+    Insights RAG:
+         ├─> Load insights JSON
+         ├─> (Optional) Retrieve supporting emails
+         └─> Send to Claude with insights
+         ↓
+    Graph RAG:
+         ├─> Embed query
+         ├─> Find top-k starting nodes (FAISS)
+         ├─> Traverse graph (multi-hop)
+         ├─> Collect context from visited nodes
+         └─> Send to Claude with graph context
+         ↓
+    Generate response + source citations
+         ↓
+    Return to frontend
+```
 
-**Files involved:**
-- `backend/services/ingest/service.py:process_pst_file()` - Main processing logic
-- `backend/services/ingest/service.py:parse_emails_from_blob()` - Email parsing
-- `backend/services/ingest/service.py:clean_body()` - Text cleaning
+### Query Examples
 
-**Redundancy check:** Skips re-extraction if JSON file already exists
+**Content RAG**:
+```
+Query: "Show me emails from Dina"
+  ↓
+Query Expansion: "Dina Hi Dina Dear Dina Dina Cartagena"
+  ↓
+Vector Search: similarity_search(expanded_query, k=10)
+  ↓
+Context: 10 email chunks mentioning Dina
+  ↓
+Prompt: "Based on these emails, answer: Show me emails from Dina"
+  ↓
+Response: "I found 8 emails involving Dina Cartagena..."
+  + Citations: [{date, sender, subject}, ...]
+```
 
-**Output format:**
-```json
-[
+**Insights RAG**:
+```
+Query: "How do I handle urgent requests?"
+  ↓
+Load: data/insights/{upload_id}_insights.json
+  ↓
+Context: Pre-computed insights + sample urgent emails
+  ↓
+Prompt: "Using these insights, answer: How do I handle urgent requests?"
+  ↓
+Response: "Based on your patterns, you typically respond to urgent..."
+```
+
+**Graph RAG**:
+```
+Query: "What's the relationship between Project Alpha and Sarah?"
+  ↓
+Find Nodes: Vector search for "Project Alpha" and "Sarah"
+  ↓
+Traverse: Find shortest path or k-hop neighbors
+  ↓
+Context: All entities and emails along path
+  ↓
+Prompt: "Based on this graph context, explain the relationship..."
+  ↓
+Response: "Sarah is the lead on Project Alpha, as seen in..."
+  + Visualization: Show graph with highlighted path
+```
+
+---
+
+## Configuration
+
+### Backend Environment Variables (`backend/.env`)
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PINECONE_API_KEY` | Pinecone API key | - | ✅ |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - | ✅ |
+| `LLM_MODEL` | Claude model name | `claude-3-5-sonnet-20241022` | ❌ |
+| `EMBEDDING_MODEL` | HuggingFace model | `all-MiniLM-L6-v2` | ❌ |
+| `EMBEDDING_DIMENSION` | Embedding size | `384` | ❌ |
+| `PINECONE_INDEX_NAME` | Pinecone index | `pst-coach` | ❌ |
+| `TIKA_SERVER_URL` | Tika endpoint | `http://tika:9998` | ❌ |
+| `CHUNK_SIZE` | Text chunk size | `500` | ❌ |
+| `CHUNK_OVERLAP` | Chunk overlap | `50` | ❌ |
+| `MAX_PST_SIZE_MB` | Max upload size | `5000` | ❌ |
+| `DATABASE_URL` | PostgreSQL URL | See config.py | ❌ |
+| `DEBUG` | Debug mode | `true` | ❌ |
+
+### Frontend Environment Variables (`frontend/.env.local`)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NEXT_PUBLIC_API_URL` | Backend URL | `http://localhost:8000` |
+
+---
+
+## API Reference
+
+### Upload Endpoints
+
+**POST `/api/uploads/`**
+- Upload PST file
+- Request: `multipart/form-data` with `file` field
+- Response: `{upload_id, status, message}`
+
+**GET `/api/uploads/`**
+- List all uploads
+- Response: `{uploads: [{upload_id, email_count, vector_count}]}`
+
+**GET `/api/uploads/{upload_id}/status`**
+- Get upload status
+- Response: `{upload_id, status, email_count}`
+
+### Chat Endpoints
+
+**POST `/api/chat/router`**
+- RAG query endpoint
+- Request:
+  ```json
   {
-    "email_id": "abc123...",
-    "subject": "Project Update",
-    "from": "john@example.com",
-    "to": "team@example.com",
-    "date": "2024-01-15 10:30:00",
-    "body": "Email body text..."
+    "messages": [{"role": "user", "content": "Query"}],
+    "upload_id": "abc123-xyz",
+    "mode": "content" | "insights" | "graph"
   }
-]
-```
+  ```
+- Response:
+  ```json
+  {
+    "content": "Answer text",
+    "citations": [{date, sender, subject}],
+    "mode_used": "content"
+  }
+  ```
 
-### 3. Vector Embedding & Indexing to Pinecone
+### Graph RAG Endpoints
 
-**What happens:**
-- Checks if upload is already indexed (redundancy check via `indexed_uploads.json`)
-- Loads extracted emails from JSON file
-- For each email:
-  - Creates rich text representation with metadata (date, sender, subject, body)
-  - Splits into chunks using RecursiveCharacterTextSplitter
-    - Chunk size: 500 characters
-    - Overlap: 50 characters
-  - Generates embeddings using HuggingFace model (all-MiniLM-L6-v2, 384 dimensions)
-  - Creates unique vector ID: `{upload_id}_{email_id}_{chunk_index}`
-  - Prepares metadata for retrieval
-- Upserts vectors to Pinecone in batches of 100
-- Records total vector count in `data/indexed_uploads.json`
+**POST `/api/graph/build`**
+- Build knowledge graph
+- Request: `{upload_id}`
+- Response: `{status, message, node_count, edge_count}`
 
-**Files involved:**
-- `backend/services/index/service.py:index_messages()` - Main indexing logic
-- `backend/services/index/service.py:ensure_pinecone_index()` - Index creation
-- `backend/services/index/service.py:mark_upload_indexed()` - Track indexed uploads
+**POST `/api/graph/query`**
+- Query knowledge graph
+- Request: `{upload_id, query}`
+- Response: `{answer, traversal_path, sources}`
 
-**Redundancy check:** Skips re-indexing if already recorded in `indexed_uploads.json`
+**GET `/api/graph/status/{upload_id}`**
+- Get graph build status
+- Response: `{status, progress, node_count, edge_count}`
 
-**Vector metadata structure:**
-```json
-{
-  "upload_id": "abc123-xyz",
-  "email_id": "def456",
-  "date": "2024-01-15 10:30:00",
-  "sender": "john@example.com",
-  "subject": "Project Update",
-  "text": "Chunk of email text...",
-  "type": "email"
-}
-```
+**GET `/api/graph/visualization/{upload_id}`**
+- Get graph visualization data
+- Response: `{nodes: [], edges: [], traversal_path: []}`
 
-### 4. AI-Powered Insights Generation
+### Analytics Endpoints
 
-**What happens:**
-- Automatically triggered after indexing completes
-- Loads extracted emails from JSON
-- Identifies most frequent sender (assumes this is the user)
-- Filters for emails FROM the user (to analyze their communication style)
-- Takes sample of up to 50 emails
-- Sends to Claude 3.5 Sonnet with coaching prompt
-- Claude analyzes:
-  - Communication patterns (responsiveness, tone, language habits)
-  - Behavioral patterns (work hours, email volume)
-  - Mood trends (emotional tone over time)
-  - Strengths and areas for improvement
-- Returns structured JSON with actionable insights
-- Saves to `data/insights/{upload_id}_insights.json`
+**GET `/api/analytics/metrics`**
+- Get email metrics
+- Query params: `upload_id`, `start_date`, `end_date`
+- Response: Email counts, trends, statistics
 
-**Files involved:**
-- `backend/services/insights/processor.py:generate_insights()` - Main insights logic
-
-**Output format:**
-```json
-{
-  "summary": "Executive summary of communication style...",
-  "behavioral_patterns": ["Pattern 1", "Pattern 2"],
-  "coaching_tips": ["Tip 1", "Tip 2"],
-  "mood_trends": "Overall tone description...",
-  "strengths": ["Strength 1", "Strength 2"],
-  "areas_for_improvement": ["Area 1", "Area 2"]
-}
-```
-
-### 5. Interactive Chat (RAG)
-
-**What happens when user asks a question:**
-
-**"Ask Inbox" mode (semantic search):**
-- User types natural language query
-- Query is embedded using same HuggingFace model
-- Performs similarity search in Pinecone
-- Retrieves top-k most relevant email chunks
-- Sends context + query to Claude
-- Claude generates answer based on retrieved emails
-- Returns response with source attribution
-
-**"Coach Me" mode (personalized insights):**
-- Loads pre-generated insights from `data/insights/{upload_id}_insights.json`
-- User can ask follow-up questions about their patterns
-- Claude uses insights + email context to provide coaching
-- Offers actionable advice and recommendations
-
-**Files involved:**
-- `backend/graph/workflow.py` - LangGraph chat orchestration
-- `backend/api/routes/chat.py` - Chat API endpoint
-
-## Architecture
-
-### System Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (Next.js)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Upload Page  │  │  Chat Page   │  │  Insights Dashboard   │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
-│         │                  │                      │              │
-└─────────┼──────────────────┼──────────────────────┼──────────────┘
-          │                  │                      │
-          │ HTTP             │ HTTP                 │ HTTP
-          ▼                  ▼                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Backend (FastAPI)                           │
-│  ┌───────────────┐  ┌───────────────┐  ┌──────────────────┐    │
-│  │ Upload Routes │  │  Chat Routes  │  │  LangGraph Agent │    │
-│  └───────┬───────┘  └───────┬───────┘  └────────┬─────────┘    │
-│          │                   │                    │              │
-│  ┌───────▼───────────────────▼────────────────────▼─────────┐   │
-│  │              Service Layer                                │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐   │   │
-│  │  │  Ingest  │  │  Index   │  │  Insights Processor  │   │   │
-│  │  │ Service  │  │ Service  │  │      Service         │   │   │
-│  │  └────┬─────┘  └────┬─────┘  └──────────┬───────────┘   │   │
-│  └───────┼─────────────┼────────────────────┼───────────────┘   │
-└──────────┼─────────────┼────────────────────┼───────────────────┘
-           │             │                    │
-           ▼             ▼                    ▼
-    ┌──────────┐  ┌─────────────┐    ┌────────────────┐
-    │  Tika    │  │  Pinecone   │    │    Claude API  │
-    │  Server  │  │  (Vectors)  │    │   (Anthropic)  │
-    └──────────┘  └─────────────┘    └────────────────┘
-           │
-           ▼
-    ┌──────────┐  ┌─────────────┐    ┌────────────────┐
-    │PostgreSQL│  │    Redis    │    │  HuggingFace   │
-    │ Database │  │    Cache    │    │  (Embeddings)  │
-    └──────────┘  └─────────────┘    └────────────────┘
-```
-
-### Data Flow
-
-```
-PST Upload → Tika Parsing → Email Extraction → Text Chunking
-     ↓            ↓              ↓                  ↓
-  storage/   raw text      JSON files         chunks
-  uploads/                 extracted/
-
-     → Embedding Generation → Vector Storage → Insights Analysis
-            ↓                      ↓                 ↓
-       HuggingFace            Pinecone          Claude API
-       (384-dim)              (cosine)          (LLM)
-            ↓                      ↓                 ↓
-       embeddings              indexed           insights/
-                                                 {id}_insights.json
-
-User Query → Embedding → Similarity Search → Context Retrieval
-     ↓           ↓              ↓                    ↓
-  "Ask Inbox"  HuggingFace   Pinecone           Top-K chunks
-     ↓           ↓              ↓                    ↓
-  RAG Chain → Claude API → Generated Answer + Sources
-```
-
-### Component Responsibilities
-
-| Component | Responsibility | Key Technologies |
-|-----------|---------------|------------------|
-| **Frontend** | User interface, file uploads, chat UI | Next.js, React, TypeScript, Tailwind |
-| **Backend API** | REST endpoints, request handling, orchestration | FastAPI, Pydantic, Uvicorn |
-| **Ingest Service** | PST parsing, email extraction, deduplication | Apache Tika, Python regex, hashlib |
-| **Index Service** | Chunking, embedding, vector storage | LangChain, HuggingFace, Pinecone |
-| **Insights Service** | AI analysis, coaching generation | LangChain, Claude API, prompt engineering |
-| **Chat Service** | RAG pipeline, query handling | LangGraph, Pinecone, Claude API |
-| **PostgreSQL** | Metadata storage (future use) | PostgreSQL 15 |
-| **Redis** | Caching, session management (future use) | Redis 7 |
-| **Pinecone** | Vector database for semantic search | Serverless index, cosine similarity |
-| **Apache Tika** | Document parsing (PST files) | Tika Server 3.0 |
-
-### Redundancy & Deduplication Mechanisms
-
-The system implements multiple layers of redundancy checks to prevent duplicate processing:
-
-1. **Upload Level** (`handle_upload()`):
-   - MD5 hash comparison of file contents
-   - Checks against `get_existing_upload_ids()`
-   - Returns existing `upload_id` if duplicate found
-
-2. **Extraction Level** (`process_pst_file()`):
-   - Checks if `data/extracted/{upload_id}.json` exists
-   - Skips Tika parsing if already extracted
-   - Supports `force_reprocess` flag to override
-
-3. **Indexing Level** (`index_messages()`):
-   - Maintains `data/indexed_uploads.json` tracking file
-   - Records `upload_id`, `vector_count`, and `indexed_at` timestamp
-   - Skips re-indexing if already recorded
-   - Supports `force_reindex` flag to override
-
-4. **Email Level**:
-   - Each email gets unique `email_id` via MD5 hash
-   - Vector IDs format: `{upload_id}_{email_id}_{chunk_index}`
-   - Prevents duplicate vectors even if re-indexed
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/uploads/` | POST | Upload PST file |
-| `/api/uploads/` | GET | List all uploads |
-| `/api/chat/router` | POST | Chat with RAG |
-| `/health` | GET | Health check |
+---
 
 ## Development
 
-### Running locally without Docker
+### Local Setup (Without Docker)
 
+**Backend**:
 ```bash
-# Backend
-cd backend
+cd pst-coach/backend
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn api.main:app --reload
+uvicorn api.main:app --reload --port 8000
+```
 
-# Frontend
-cd frontend
+**Frontend**:
+```bash
+cd pst-coach/frontend
 npm install
 npm run dev
 ```
 
-### Rebuilding containers
+**Dependencies**:
+- PostgreSQL 15+ (port 5432)
+- Redis 7+ (port 6379)
+- Apache Tika (port 9998): `java -jar tika-server-standard-3.0.0.jar`
+
+### Project Structure
+
+```
+pst-coach/
+├── backend/
+│   ├── api/                  # FastAPI routes & middleware
+│   ├── core/                 # Config & logging
+│   ├── graph/                # LangGraph workflows
+│   ├── models/               # Database models
+│   ├── services/             # Business logic
+│   │   ├── ingest/
+│   │   ├── index/
+│   │   ├── insights/
+│   │   └── graph_rag/
+│   ├── init_db.py            # Database initialization
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── app/              # Next.js pages
+│   │   ├── components/       # React components
+│   │   └── lib/              # Utilities
+│   ├── public/
+│   └── package.json
+├── docker-compose.yml
+└── README.md
+```
+
+### Testing
 
 ```bash
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+# Backend tests
+cd backend
+pytest
+
+# Frontend tests
+cd frontend
+npm test
 ```
+
+### Debugging
+
+**View logs**:
+```bash
+# All containers
+docker-compose logs -f
+
+# Specific service
+docker logs pst-coach-backend -f
+docker logs pst-coach-tika -f
+```
+
+**Access databases**:
+```bash
+# PostgreSQL
+docker exec -it pst-coach-postgres psql -U pstcoach -d pst_coach
+
+# Redis
+docker exec -it pst-coach-redis redis-cli
+```
+
+**Restart services**:
+```bash
+docker-compose restart backend
+docker-compose restart frontend
+```
+
+---
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### 1. Docker Containers Won't Start
-
-**Symptom:** `docker-compose up -d` fails with connection errors
-
-**Solutions:**
+**1. Containers won't start**
 ```bash
-# Check if Docker Desktop is running
+# Check Docker is running
 docker ps
 
-# If not running, start Docker Desktop and wait for it to fully initialize
+# Check logs
+docker-compose logs
 
-# Check for port conflicts
-netstat -ano | findstr "8000"  # Windows
-lsof -i :8000                  # Mac/Linux
-
-# Restart Docker Compose
+# Rebuild
 docker-compose down
-docker-compose up -d
+docker-compose up -d --build
 ```
 
-#### 2. PST Upload Fails
+**2. PST upload fails**
+- Check Tika is running: `curl http://localhost:9998/tika`
+- Check file size < 5GB
+- View backend logs: `docker logs pst-coach-backend -f`
 
-**Symptom:** Upload returns error or times out
+**3. No search results**
+- Verify indexing completed: Check `data/indexed_uploads.json`
+- Check Pinecone index: Visit Pinecone console
+- Verify API keys in `backend/.env`
 
-**Possible causes:**
-- Tika server not running or unhealthy
-- PST file too large (>5GB default limit)
-- Tika server crashed
+**4. Graph build fails**
+- Ensure sufficient memory (4GB+ recommended)
+- Check extracted emails exist: `ls data/extracted/`
+- Monitor logs: `docker logs pst-coach-backend -f`
 
-**Solutions:**
-```bash
-# Check Tika container status
-docker logs pst-coach-tika --tail 50
+**5. Frontend can't connect**
+- Verify backend is running: `curl http://localhost:8000/health`
+- Check `frontend/.env.local` has correct API URL
+- Check CORS settings in `backend/.env`
 
-# Restart Tika if needed
-docker-compose restart tika
+### Performance Tuning
 
-# For large files, increase Tika timeout in backend/.env:
-# (No specific setting exists yet, but Tika has 1 hour timeout by default)
+For large PST files (>1GB):
+- Increase Docker memory: Docker Desktop → Settings → Resources
+- Adjust chunk size: `CHUNK_SIZE=1000` in `backend/.env`
+- Monitor resources: `docker stats`
 
-# Check Tika is responding
-curl http://localhost:9998/tika
-```
-
-#### 3. No Emails Extracted from PST
-
-**Symptom:** Processing completes but `{upload_id}.json` has 0 or very few emails
-
-**Possible causes:**
-- PST file is encrypted or corrupted
-- Email format not recognized by parser
-- PST is empty or contains non-email items
-
-**Solutions:**
-```bash
-# Check extracted JSON file
-cat pst-coach/backend/data/extracted/{upload_id}.json
-
-# Check backend logs for parsing warnings
-docker logs pst-coach-backend | grep "email"
-
-# Try opening PST in Outlook to verify it has emails
-# Consider exporting PST again from Outlook if corrupted
-```
-
-#### 4. Indexing Fails or Vectors Not in Pinecone
-
-**Symptom:** Extraction succeeds but search returns no results
-
-**Possible causes:**
-- Pinecone API key invalid or missing
-- Pinecone index doesn't exist
-- Network issues connecting to Pinecone
-- Embedding model failed to load
-
-**Solutions:**
-```bash
-# Check if index exists in Pinecone dashboard
-# Or check backend logs
-docker logs pst-coach-backend | grep -i pinecone
-
-# Verify API key in backend/.env
-echo $PINECONE_API_KEY  # Should not be empty
-
-# Manually trigger re-indexing (future feature)
-# For now, delete data/indexed_uploads.json and restart backend
-
-# Check Pinecone index stats via API
-curl http://localhost:8000/api/index/stats
-```
-
-#### 5. Chat Returns No Results or Errors
-
-**Symptom:** Questions return "I don't have information" or error messages
-
-**Possible causes:**
-- No vectors indexed (check step 4)
-- Anthropic API key missing/invalid
-- Query embedding failed
-- Pinecone connection issues
-
-**Solutions:**
-```bash
-# Check Anthropic API key
-grep ANTHROPIC_API_KEY pst-coach/backend/.env
-
-# Check backend logs for errors
-docker logs pst-coach-backend -f
-
-# Test Claude API directly
-curl https://api.anthropic.com/v1/messages \
-  -H "x-api-key: $ANTHROPIC_API_KEY" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "content-type: application/json" \
-  -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":100,"messages":[{"role":"user","content":"test"}]}'
-
-# Verify vectors exist in Pinecone
-# Check Pinecone dashboard or use API
-```
-
-#### 6. Insights Not Generated
-
-**Symptom:** Upload and indexing complete but no insights file exists
-
-**Possible causes:**
-- Insights generation threw exception
-- Claude API error
-- Insufficient emails to analyze (<5 emails)
-
-**Solutions:**
-```bash
-# Check if insights file exists
-ls -la pst-coach/backend/data/insights/
-
-# Check backend logs for insight errors
-docker logs pst-coach-backend | grep -i insight
-
-# Check extracted emails count
-cat pst-coach/backend/data/extracted/{upload_id}.json | jq 'length'
-
-# Manually trigger insights (future API endpoint)
-```
-
-#### 7. Frontend Can't Connect to Backend
-
-**Symptom:** Frontend shows connection errors or 404s
-
-**Possible causes:**
-- Backend container not running
-- CORS configuration issue
-- Incorrect API URL in frontend config
-
-**Solutions:**
-```bash
-# Check backend is running
-docker ps | grep backend
-
-# Check backend health
-curl http://localhost:8000/health
-
-# Verify frontend .env.local
-cat pst-coach/frontend/.env.local
-# Should have: NEXT_PUBLIC_API_URL=http://localhost:8000
-
-# Check CORS settings in backend/.env
-# Should include: CORS_ORIGINS=http://localhost:3000,http://localhost:3001
-
-# Check frontend logs
-docker logs pst-coach-frontend
-```
-
-#### 8. "Already Processed" Message on Upload
-
-**Symptom:** Uploading PST shows "already processed" immediately
-
-**Explanation:** This is **expected behavior** - the system detected you uploaded the same file before (via MD5 hash) and is reusing existing data
-
-**If you want to force re-processing:**
-```bash
-# Option 1: Rename/modify the PST file (changes hash)
-
-# Option 2: Manually delete existing data
-rm pst-coach/backend/data/uploads/{upload_id}.pst
-rm pst-coach/backend/data/extracted/{upload_id}.json
-
-# Edit data/indexed_uploads.json and remove the entry
-# Then re-upload
-
-# Option 3: Future feature - Add force_reprocess API flag
-```
-
-### Viewing Logs
+### Reset Everything
 
 ```bash
-# All containers
-docker-compose logs -f
-
-# Specific container
-docker logs pst-coach-backend -f
-docker logs pst-coach-tika -f
-docker logs pst-coach-frontend -f
-
-# Filter logs
-docker logs pst-coach-backend 2>&1 | grep ERROR
-```
-
-### Resetting Everything
-
-```bash
-# Stop all containers
+# Stop containers
 docker-compose down
 
-# Remove all data (WARNING: deletes uploads, extracts, insights)
+# Remove all data
 rm -rf pst-coach/backend/data/*
 
 # Remove volumes
 docker-compose down -v
 
-# Rebuild from scratch
-docker-compose build --no-cache
-docker-compose up -d
+# Rebuild
+docker-compose up -d --build
 ```
 
-### Database Access
-
-```bash
-# Connect to PostgreSQL
-docker exec -it pst-coach-postgres psql -U pstcoach -d pst_coach
-
-# Connect to Redis
-docker exec -it pst-coach-redis redis-cli
-
-# Pinecone - Use dashboard at https://app.pinecone.io/
-```
-
-### Performance Tuning
-
-For large PST files (>1GB):
-- Increase Docker memory allocation (Docker Desktop → Settings → Resources)
-- Monitor resource usage: `docker stats`
-- Consider chunking upload or splitting PST files
-- Adjust `CHUNK_SIZE` in `backend/.env` (default: 500)
-
-## Development
-
-### Running Tests
-
-```bash
-# Backend tests (if available)
-cd pst-coach/backend
-pytest
-
-# Frontend tests (if available)
-cd pst-coach/frontend
-npm test
-```
-
-### Rebuilding Containers
-
-```bash
-# Rebuild after code changes
-docker-compose down
-docker-compose build
-docker-compose up -d
-
-# Rebuild specific service
-docker-compose build backend
-docker-compose up -d backend
-
-# No-cache rebuild (slower but ensures clean build)
-docker-compose build --no-cache
-```
-
-### Environment Variables Reference
-
-See [Configuration](#configuration) section for complete list.
-
-Key variables:
-- `PINECONE_API_KEY` - Required for vector storage
-- `ANTHROPIC_API_KEY` - Required for LLM
-- `LLM_MODEL` - Claude model to use
-- `CHUNK_SIZE` - Text chunk size for embeddings (default: 500)
-- `MAX_PST_SIZE_MB` - Max upload size (default: 5000)
+---
 
 ## Security Considerations
 
-- Never commit `.env` files to git
+- Never commit `.env` files to version control
 - Rotate API keys regularly
-- PST files may contain sensitive information - handle with care
+- PST files may contain sensitive data - handle with care
 - Use strong `SECRET_KEY` in production
-- Enable HTTPS in production deployments
-- Review and redact sensitive data before sharing insights
+- Enable HTTPS for production deployments
+- Review data before sharing insights
+- Consider encryption at rest for stored PST files
+
+---
 
 ## Future Enhancements
 
-- [ ] User authentication and multi-user support
-- [ ] Email timeline visualization
-- [ ] Export insights to PDF/CSV
-- [ ] Advanced filtering (date ranges, senders, topics)
-- [ ] Real-time processing status updates
-- [ ] Support for other email formats (MBOX, EML)
-- [ ] Sentiment analysis over time
+- [ ] User authentication (JWT, OAuth)
+- [ ] Multi-user support with data isolation
+- [ ] Real-time processing status via WebSockets
 - [ ] Email thread reconstruction
+- [ ] Sentiment analysis over time
+- [ ] Export insights to PDF/CSV
+- [ ] Support for MBOX, EML formats
+- [ ] Advanced filters (date ranges, senders, topics)
+- [ ] Email timeline visualization
 - [ ] API rate limiting and caching
+- [ ] Hybrid search (keyword + semantic)
+- [ ] Fine-tuned embeddings for email domain
 
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+---
 
 ## License
 
 MIT
 
 ---
+
+## Contributing
+
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new features
+4. Submit a pull request with clear description
+
+---
+
+**Built with care for privacy-conscious professionals who want to understand and improve their communication patterns.**

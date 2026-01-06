@@ -8,7 +8,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from core.config import settings
 from core.logging import setup_logging
-from api.routes import uploads, chat, analytics
+from api.routes import uploads, chat, analytics, graph_rag
 from api.middleware.error_handler import ErrorHandlerMiddleware
 from api.middleware.request_id import RequestIDMiddleware
 
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(uploads.router, prefix="/api/uploads", tags=["Uploads"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(graph_rag.router, prefix="/api/graph", tags=["Graph RAG"])
 
 
 @app.get("/")

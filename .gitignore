@@ -87,3 +87,15 @@ htmlcov/
 *.temp
 tmp/
 temp/
+nul
+
+# Jupyter notebooks (may contain sensitive data or API keys)
+*.ipynb
+
+# Backup files
+*.bak
+*~
+
+# Sensitive JSON files in data directories
+**/data/**/*.json
+**/indexed_uploads.json

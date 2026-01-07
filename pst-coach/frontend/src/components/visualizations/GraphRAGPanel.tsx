@@ -8,26 +8,9 @@ import {
   Play,
   AlertCircle,
   CheckCircle2,
-  RefreshCw,
   ChevronDown,
   ChevronUp
 } from 'lucide-react'
-
-interface GraphNode {
-  id: number
-  label: string
-  concepts: string[]
-  in_traversal: boolean
-  traversal_order: number
-}
-
-interface GraphEdge {
-  source: number
-  target: number
-  weight: number
-  similarity: number
-  shared_concepts: string[]
-}
 
 interface GraphStats {
   node_count: number
@@ -45,7 +28,7 @@ interface GraphRAGPanelProps {
 }
 
 export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelProps) {
-  const [buildStatus, setBuildStatus] = useState<string>('pending')
+  const [buildStatus, setBuildStatus] = useState<string>('loading')
   const [progress, setProgress] = useState<number>(0)
   const [nodeCount, setNodeCount] = useState<number>(0)
   const [edgeCount, setEdgeCount] = useState<number>(0)
@@ -53,6 +36,7 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
   const [stats, setStats] = useState<GraphStats | null>(null)
   const [isBuilding, setIsBuilding] = useState(false)
   const [showStats, setShowStats] = useState(true)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
 
   // Check build status on mount and periodically while building
   const checkStatus = useCallback(async () => {
@@ -64,6 +48,7 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
       setNodeCount(data.node_count)
       setEdgeCount(data.edge_count)
       setError(data.error)
+      setIsInitialLoad(false)
 
       if (data.status === 'ready') {
         setIsBuilding(false)
@@ -76,6 +61,9 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
       }
     } catch (err) {
       console.error('Failed to check graph status:', err)
+      setIsInitialLoad(false)
+      setError('Cannot connect to backend. Please ensure the server is running.')
+      setBuildStatus('error')
     }
   }, [uploadId])
 
@@ -126,6 +114,25 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
     'Analyze my communication patterns'
   ]
 
+  // Show loading during initial check
+  if (isInitialLoad) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-white/60 rounded-2xl p-6 border border-white/80 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-mineral-100">
+              <Loader2 className="w-5 h-5 text-mineral-600 animate-spin" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-mineral-900">Knowledge Graph</h3>
+              <p className="text-sm text-mineral-500">Checking status...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Build Status Card */}
@@ -138,12 +145,15 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
               buildStatus === 'error' ? 'bg-red-100' :
               'bg-mineral-100'
             }`}>
-              <Network className={`w-5 h-5 ${
-                buildStatus === 'ready' ? 'text-green-600' :
-                buildStatus === 'building' ? 'text-amber-600' :
-                buildStatus === 'error' ? 'text-red-600' :
-                'text-mineral-600'
-              }`} />
+              {buildStatus === 'building' ? (
+                <Loader2 className="w-5 h-5 text-amber-600 animate-spin" />
+              ) : (
+                <Network className={`w-5 h-5 ${
+                  buildStatus === 'ready' ? 'text-green-600' :
+                  buildStatus === 'error' ? 'text-red-600' :
+                  'text-mineral-600'
+                }`} />
+              )}
             </div>
             <div>
               <h3 className="font-semibold text-mineral-900">Knowledge Graph</h3>
@@ -174,7 +184,7 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
               />
             </div>
             <p className="text-xs text-mineral-500 text-center">
-              {Math.round(progress * 100)}% complete
+              {Math.round(progress * 100)}% complete - This may take several minutes for large datasets
             </p>
           </div>
         )}
@@ -183,11 +193,11 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
         {(nodeCount > 0 || edgeCount > 0) && (
           <div className="flex gap-6 mt-4 pt-4 border-t border-mineral-100">
             <div className="text-center">
-              <p className="text-2xl font-bold text-mineral-900">{nodeCount}</p>
+              <p className="text-2xl font-bold text-mineral-900">{nodeCount.toLocaleString()}</p>
               <p className="text-xs text-mineral-500">Nodes</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-bold text-mineral-900">{edgeCount}</p>
+              <p className="text-2xl font-bold text-mineral-900">{edgeCount.toLocaleString()}</p>
               <p className="text-xs text-mineral-500">Edges</p>
             </div>
           </div>
@@ -200,25 +210,14 @@ export default function GraphRAGPanel({ uploadId, onQueryClick }: GraphRAGPanelP
           </div>
         )}
 
-        {/* Build button */}
-        {buildStatus !== 'ready' && !isBuilding && (
+        {/* Build button - Only shown when graph is NOT built yet */}
+        {buildStatus === 'pending' && !isBuilding && (
           <button
             onClick={handleBuild}
             className="mt-4 w-full py-3 px-4 bg-terra-600 hover:bg-terra-500 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors"
           >
             <Play className="w-4 h-4" />
             Build Knowledge Graph
-          </button>
-        )}
-
-        {/* Rebuild button */}
-        {buildStatus === 'ready' && (
-          <button
-            onClick={handleBuild}
-            className="mt-4 w-full py-2 px-4 bg-mineral-100 hover:bg-mineral-200 text-mineral-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Rebuild Graph
           </button>
         )}
       </div>

@@ -90,7 +90,7 @@ temp/
 nul
 
 # Jupyter notebooks (may contain sensitive data or API keys)
-*.ipynb
+# *.ipynb  # Temporarily commented to allow debugging
 
 # Backup files
 *.bak

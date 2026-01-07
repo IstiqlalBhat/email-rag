@@ -18,6 +18,29 @@ from pinecone import Pinecone, ServerlessSpec
 
 from core.config import settings
 
+
+def extract_text_content(content) -> str:
+    """
+    Extract text from LLM response content.
+    Handles both simple strings and Gemini's list format.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Gemini returns [{'type': 'text', 'text': '...'}]
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if 'text' in item:
+                    parts.append(item['text'])
+                elif 'content' in item:
+                    parts.append(item['content'])
+            elif isinstance(item, str):
+                parts.append(item)
+        return ''.join(parts) if parts else str(content)
+    return str(content)
+
+
 # Initialize LLM
 if settings.LLM_PROVIDER == "google":
     llm = ChatGoogleGenerativeAI(
@@ -147,7 +170,7 @@ Question: {original_query}
 Search terms:"""
         
         expansion_response = llm.invoke(expansion_prompt)
-        expanded_terms = expansion_response.content.strip()
+        expanded_terms = extract_text_content(expansion_response.content).strip()
         
         # Combine original query with expanded terms for better coverage
         search_query = f"{original_query} {expanded_terms}"
@@ -306,8 +329,8 @@ def generate_response(state: ChatState) -> ChatState:
         invoke_args["history"] = history_str
     
     response_msg = chain.invoke(invoke_args)
-    
-    state["response"] = response_msg.content
+
+    state["response"] = extract_text_content(response_msg.content)
     return state
 
 

@@ -40,6 +40,37 @@ This project uses a **Hybrid RAG (Retrieval Augmented Generation)** approach to 
 - **Technology**: **NetworkX** (Graph) + **FAISS** (Local Vectors).
 - **How it works**: Builds a network of entities (People, Dates, Topics) and their relationships. It "hops" through the graph to connect distant pieces of information that vector search might miss.
 
+### Comparison: Regular RAG vs Graph RAG
+
+| Aspect | Regular RAG (Ask Inbox / Coach Me) | Graph RAG |
+|--------|-----------------------------------|-----------|
+| **How it works** | Vector similarity search - finds chunks of text most similar to your query | Builds a knowledge graph connecting concepts, then traverses related nodes |
+| **Data structure** | Flat list of document chunks in Pinecone | NetworkX graph with nodes and edges (e.g., 42K nodes, 287K edges) |
+| **Query approach** | Direct embedding match: "Find emails about X" | Graph traversal: Starts from matching nodes, explores connected concepts |
+| **Best for** | Specific searches ("emails from John about budget") | Complex questions requiring context across multiple emails |
+| **Context** | Returns top-k most similar chunks | Expands context by following relationship edges |
+| **Speed** | Faster (single vector search) | Slower but more thorough (graph traversal + vector search) |
+
+### When to Use Each Mode
+
+**Regular RAG (Ask Inbox)**
+- Finding specific emails or conversations
+- Simple factual questions ("When did I email John?")
+- Quick keyword-based searches
+
+**Coach Me (Insights RAG)**
+- Understanding your communication patterns
+- Getting behavioral coaching insights
+- Analyzing trends and habits
+
+**Graph RAG**
+- Understanding relationships between topics/people
+- Questions about patterns across many emails
+- "How are X and Y connected?"
+- Deep analysis requiring multi-hop reasoning
+
+The Graph RAG builds a "semantic web" of your emails, connecting related concepts so it can answer questions that require understanding relationships rather than just finding matching text.
+
 ---
 
 ## Hardware Acceleration (CUDA/GPU)

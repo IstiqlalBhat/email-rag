@@ -137,8 +137,18 @@ class GraphRAGService:
     - Batched operations
     """
 
+    @staticmethod
+    def normalize_upload_id(upload_id: str) -> str:
+        """Normalize upload_id by removing common suffixes like -manual."""
+        # Remove -manual suffix if present
+        if upload_id.endswith('-manual'):
+            return upload_id[:-7]
+        return upload_id
+
     def __init__(self, upload_id: str, max_emails: int = MAX_EMAILS_DEFAULT, max_chunks: int = MAX_CHUNKS_DEFAULT):
-        self.upload_id = upload_id
+        # Normalize the upload_id for consistent graph file naming
+        self.upload_id = self.normalize_upload_id(upload_id)
+        self.original_upload_id = upload_id  # Keep original for document loading
         self.max_emails = max_emails
         self.max_chunks = max_chunks
         self.llm = self._init_llm()
@@ -200,10 +210,19 @@ class GraphRAGService:
 
     def _load_documents(self) -> List[Document]:
         """Load documents with configurable limit."""
-        input_file = os.path.join(settings.EXTRACTED_DIR, f"{self.upload_id}.json")
+        # Try multiple variations of upload_id for file matching
+        possible_ids = [self.upload_id, self.original_upload_id, f"{self.upload_id}-manual"]
+        input_file = None
+
+        for uid in possible_ids:
+            candidate = os.path.join(settings.EXTRACTED_DIR, f"{uid}.json")
+            if os.path.exists(candidate):
+                input_file = candidate
+                logger.info(f"Found file: {candidate}")
+                break
 
         # Fuzzy match if exact file not found
-        if not os.path.exists(input_file):
+        if not input_file:
             for filename in os.listdir(settings.EXTRACTED_DIR):
                 if filename.startswith(self.upload_id) and filename.endswith('.json') and not filename.endswith('_analysis.json'):
                     input_file = os.path.join(settings.EXTRACTED_DIR, filename)
@@ -269,11 +288,12 @@ Subject: {email.get('subject', 'No Subject')}
 
     def build(self, progress_callback: Optional[callable] = None) -> bool:
         """Build knowledge graph - FAST version with no LLM calls."""
-        logger.info(f"Building graph for {self.upload_id} (max {self.max_emails} emails, {self.max_chunks} chunks)")
+        logger.info(f"Building graph for {self.upload_id} (original: {self.original_upload_id}, max {self.max_emails} emails, {self.max_chunks} chunks)")
         start_time = time.time()
 
+        # Use normalized upload_id for status tracking
         _build_status[self.upload_id] = GraphBuildStatus(
-            upload_id=self.upload_id,
+            upload_id=self.original_upload_id,  # Return original ID to frontend
             status="building",
             progress=0.0
         )
@@ -454,13 +474,16 @@ Subject: {email.get('subject', 'No Subject')}
 # Module-level functions
 def get_graph_service(upload_id: str) -> GraphRAGService:
     """Get or create GraphRAG service."""
-    if upload_id in _graph_cache:
-        return _graph_cache[upload_id]
+    # Normalize upload_id for consistent cache lookup
+    normalized_id = GraphRAGService.normalize_upload_id(upload_id)
+
+    if normalized_id in _graph_cache:
+        return _graph_cache[normalized_id]
 
     service = GraphRAGService(upload_id)
     if service.is_built():
         service.load()
-        _graph_cache[upload_id] = service
+        _graph_cache[normalized_id] = service
 
     return service
 
@@ -471,7 +494,8 @@ def build_graph(upload_id: str, progress_callback: Optional[callable] = None,
     service = GraphRAGService(upload_id, max_emails=max_emails, max_chunks=max_chunks)
     success = service.build(progress_callback)
     if success:
-        _graph_cache[upload_id] = service
+        # Cache with normalized id
+        _graph_cache[service.upload_id] = service
     return success
 
 
@@ -482,13 +506,43 @@ def query_graph(upload_id: str, query: str) -> GraphQueryResult:
 
 
 def get_build_status(upload_id: str) -> GraphBuildStatus:
-    """Get build status."""
-    if upload_id in _build_status:
-        return _build_status[upload_id]
+    """Get build status with caching to avoid repeated graph loading."""
+    # Normalize upload_id for consistent lookup
+    normalized_id = GraphRAGService.normalize_upload_id(upload_id)
+
+    # Return cached status if available
+    if normalized_id in _build_status:
+        return _build_status[normalized_id]
 
     service = GraphRAGService(upload_id)
     if service.is_built():
-        return GraphBuildStatus(upload_id=upload_id, status="ready", progress=1.0)
+        # Check if already cached in _graph_cache
+        if normalized_id in _graph_cache:
+            cached = _graph_cache[normalized_id]
+            node_count = len(cached.knowledge_graph.graph.nodes) if cached.knowledge_graph else 0
+            edge_count = len(cached.knowledge_graph.graph.edges) if cached.knowledge_graph else 0
+        else:
+            # Load once and cache
+            try:
+                service.load()
+                _graph_cache[normalized_id] = service
+                node_count = len(service.knowledge_graph.graph.nodes) if service.knowledge_graph else 0
+                edge_count = len(service.knowledge_graph.graph.edges) if service.knowledge_graph else 0
+            except Exception as e:
+                logger.error(f"Failed to load graph for status: {e}")
+                node_count = 0
+                edge_count = 0
+
+        status = GraphBuildStatus(
+            upload_id=upload_id,
+            status="ready",
+            progress=1.0,
+            node_count=node_count,
+            edge_count=edge_count
+        )
+        # Cache the status to avoid repeated loading
+        _build_status[normalized_id] = status
+        return status
 
     return GraphBuildStatus(upload_id=upload_id, status="pending", progress=0.0)
 

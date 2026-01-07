@@ -64,16 +64,8 @@ export default function ChatPage() {
   // Fetch existing uploads on mount
   useEffect(() => {
     const initializeUploadId = async () => {
-      // First check localStorage
-      const storedId = localStorage.getItem('current_upload_id')
-      if (storedId) {
-        setUploadId(storedId)
-        setIsInitialized(true)
-        return
-      }
-
-      // Otherwise fetch from API
       try {
+        // Always fetch from API to get valid uploads
         const response = await api.get('/api/uploads/')
         const uploads = response.data?.uploads || []
 
@@ -84,13 +76,25 @@ export default function ChatPage() {
           )
           const bestUpload = sortedUploads[0]
 
-          if (bestUpload?.upload_id && bestUpload.vector_count > 0) {
+          // Check if localStorage has a valid uploadId from current uploads
+          const storedId = localStorage.getItem('current_upload_id')
+          const storedIdIsValid = uploads.some((u: any) => u.upload_id === storedId)
+
+          if (storedIdIsValid && storedId) {
+            setUploadId(storedId)
+          } else if (bestUpload?.upload_id && bestUpload.vector_count > 0) {
+            // Use the best upload from API
             setUploadId(bestUpload.upload_id)
             localStorage.setItem('current_upload_id', bestUpload.upload_id)
           }
         }
       } catch (error) {
         console.error('Failed to fetch uploads:', error)
+        // Fallback to localStorage if API fails
+        const storedId = localStorage.getItem('current_upload_id')
+        if (storedId) {
+          setUploadId(storedId)
+        }
       }
       setIsInitialized(true)
     }
@@ -268,57 +272,98 @@ export default function ChatPage() {
               )}
             </div>
           ) : activeMode === 'graph' ? (
-            // Graph Mode - Knowledge Graph
+            // Graph Mode - Knowledge Graph with Chat
             <div className="space-y-6">
-              <div className="text-center space-y-3 mb-8">
-                <h2 className="text-3xl font-serif font-medium text-mineral-900">
-                  Knowledge Graph
-                </h2>
-                <p className="text-mineral-600">
-                  Build and query a knowledge graph for deeper insights
-                </p>
-              </div>
-              {uploadId ? (
-                <div className="grid md:grid-cols-2 gap-6">
-                  <GraphRAGPanel
-                    uploadId={uploadId}
-                    onQueryClick={(query) => {
-                      setInput(query)
-                      handleSend(query)
-                    }}
-                  />
-                  {/* Messages area for graph mode */}
-                  <div className="bg-white/60 rounded-2xl p-6 border border-white/80 shadow-sm min-h-[400px]">
-                    <h3 className="font-semibold text-mineral-900 mb-4">Graph Query Results</h3>
-                    {messages.length === 0 ? (
-                      <div className="text-center py-12 text-mineral-400">
-                        <Network className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p>Build the graph and ask questions to see results here</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4 max-h-[500px] overflow-y-auto">
-                        {messages.filter(m => m.role === 'assistant').slice(-3).map((message) => (
-                          <div key={message.id} className="bg-mineral-50 rounded-lg p-4">
-                            <p className="text-mineral-800 text-sm whitespace-pre-wrap">{message.content}</p>
-                            {message.citations && message.citations.length > 0 && (
-                              <div className="mt-3 pt-3 border-t border-mineral-200">
-                                <p className="text-xs text-mineral-400 mb-2">Sources:</p>
-                                {message.citations.slice(0, 3).map((c, i) => (
-                                  <p key={i} className="text-xs text-mineral-500 truncate">
-                                    {c.sender} - {c.subject}
-                                  </p>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+              {/* Collapsible Graph Stats Panel */}
+              {uploadId && (
+                <GraphRAGPanel
+                  uploadId={uploadId}
+                  onQueryClick={(query) => {
+                    setInput(query)
+                    handleSend(query)
+                  }}
+                />
+              )}
+
+              {/* Chat Messages for Graph Mode */}
+              {!uploadId ? (
+                <div className="text-center py-16 bg-white/40 rounded-2xl">
+                  <p className="text-mineral-500">Upload a PST file first to build a knowledge graph</p>
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="text-center py-12 space-y-6">
+                  <div className="w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center mx-auto">
+                    <Network className="w-10 h-10 text-purple-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-2xl font-serif font-medium text-mineral-900">
+                      Ask the Knowledge Graph
+                    </h3>
+                    <p className="text-mineral-600 max-w-md mx-auto">
+                      Graph RAG connects related concepts across your emails for deeper, contextual answers
+                    </p>
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-16 bg-white/40 rounded-2xl">
-                  <p className="text-mineral-500">Upload a PST file first to build a knowledge graph</p>
+                <div className="space-y-8">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : ''}`}
+                    >
+                      {message.role === 'assistant' && (
+                        <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 border border-purple-200">
+                          <Network className="w-5 h-5 text-purple-700" />
+                        </div>
+                      )}
+
+                      <div className={`max-w-[85%] lg:max-w-[75%] ${message.role === 'user' ? 'order-first' : ''}`}>
+                        <div
+                          className={`rounded-3xl px-6 py-4 shadow-sm ${message.role === 'user'
+                            ? 'bg-purple-600 text-white rounded-br-sm'
+                            : 'bg-white text-mineral-800 border border-mineral-100 rounded-bl-sm'
+                            }`}
+                        >
+                          <p className="whitespace-pre-wrap leading-relaxed text-base">{message.content}</p>
+                        </div>
+
+                        {/* Citations for graph results */}
+                        {message.citations && message.citations.length > 0 && (
+                          <div className="mt-4 space-y-2 pl-4 border-l-2 border-purple-200">
+                            <p className="text-xs text-mineral-400 uppercase tracking-widest font-bold">Sources</p>
+                            {message.citations.slice(0, 5).map((c, i) => (
+                              <div key={i} className="bg-white/40 rounded-lg p-3 text-sm border border-white/60">
+                                <p className="text-mineral-500 text-xs">{c.date} • {c.sender}</p>
+                                <p className="text-mineral-700 font-medium truncate">{c.subject}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {message.role === 'user' && (
+                        <div className="w-10 h-10 rounded-full bg-mineral-800 flex items-center justify-center flex-shrink-0 shadow-md">
+                          <User className="w-5 h-5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {isLoading && (
+                    <div className="flex gap-4">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center border border-purple-200">
+                        <Loader2 className="w-5 h-5 text-purple-600 animate-spin" />
+                      </div>
+                      <div className="bg-white/50 rounded-2xl px-6 py-4 border border-white/60">
+                        <div className="flex items-center gap-2 text-mineral-500">
+                          <span className="font-medium">Traversing knowledge graph</span>
+                          <span className="animate-pulse">...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
                 </div>
               )}
             </div>
@@ -476,8 +521,8 @@ export default function ChatPage() {
         </div>
       </main>
 
-      {/* Input Area - Hidden in Explore and Graph modes */}
-      {activeMode !== 'explore' && activeMode !== 'graph' && (
+      {/* Input Area - Hidden only in Explore mode */}
+      {activeMode !== 'explore' && (
         <footer className="border-t border-mineral-200 bg-white/80 backdrop-blur-xl sticky bottom-0 z-50">
           <div className="max-w-4xl mx-auto px-4 py-6">
             <div className="relative shadow-lg rounded-2xl bg-white transition-shadow hover:shadow-xl">
@@ -488,6 +533,8 @@ export default function ChatPage() {
                 placeholder={
                   activeMode === 'coach'
                     ? 'Ask for coaching insights...'
+                    : activeMode === 'graph'
+                    ? 'Ask the knowledge graph...'
                     : 'Search your emails...'
                 }
                 rows={1}

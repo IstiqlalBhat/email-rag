@@ -38,6 +38,8 @@ An AI-powered email intelligence platform that analyzes Outlook PST files to pro
 - **Multi-Hop Reasoning**: Graph traversal for complex queries
 - **Incremental Processing**: Redundancy checks prevent re-processing
 - **Source Attribution**: Every response includes source citations
+- **Redis Caching**: LLM responses and analytics data cached for performance
+- **Rate Limiting**: API protection with per-endpoint rate limits
 
 ---
 
@@ -67,8 +69,11 @@ PST Coach is built on a modern microservices architecture with three primary lay
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │                   Middleware Layer                              │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐    │ │
-│  │  │ Error Handle │  │  Request ID  │  │  CORS / GZip     │    │ │
+│  │  │ Error Handle │  │  Request ID  │  │  Rate Limiter    │    │ │
 │  │  └──────────────┘  └──────────────┘  └──────────────────┘    │ │
+│  │  ┌──────────────────────────────────────────────────────┐    │ │
+│  │  │              Redis Cache Layer                        │    │ │
+│  │  └──────────────────────────────────────────────────────┘    │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │                   Orchestration Layer                           │ │
@@ -123,7 +128,7 @@ PST Coach is built on a modern microservices architecture with three primary lay
 | **Document Parser** | Apache Tika 3.0 | PST file extraction |
 | **Graph Engine** | NetworkX, FAISS | Knowledge graph, local vectors |
 | **Metadata DB** | PostgreSQL 15 | Structured data storage |
-| **Cache** | Redis 7 | Session cache, rate limiting |
+| **Cache** | Redis 7 | Response caching, rate limiting, session management |
 | **Containerization** | Docker Compose | Multi-container orchestration |
 | **Validation** | Pydantic v2 | Schema validation |
 | **Text Processing** | spaCy, NLTK | NER, text analysis |
@@ -241,7 +246,8 @@ backend/
 │   │   └── graph_rag.py              # POST /api/graph/* (graph ops)
 │   └── middleware/
 │       ├── error_handler.py          # Global error handling
-│       └── request_id.py             # Request tracking
+│       ├── request_id.py             # Request tracking
+│       └── rate_limiter.py           # Redis-based rate limiting
 ├── core/
 │   ├── config.py                     # Pydantic settings
 │   └── logging.py                    # Loguru setup
@@ -255,6 +261,8 @@ backend/
     │   └── service.py                # Vector embedding & Pinecone
     ├── insights/
     │   └── processor.py              # AI coaching insights
+    ├── cache/
+    │   └── redis_service.py          # Redis caching & rate limiting
     └── graph_rag/
         ├── service.py                # Graph RAG orchestration
         ├── knowledge_graph.py        # NetworkX graph builder
@@ -660,7 +668,37 @@ Response: "Sarah is the lead on Project Alpha, as seen in..."
 | `CHUNK_OVERLAP` | Chunk overlap | `50` | ❌ |
 | `MAX_PST_SIZE_MB` | Max upload size | `5000` | ❌ |
 | `DATABASE_URL` | PostgreSQL URL | See config.py | ❌ |
+| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` | ❌ |
+| `CACHE_TTL_SECONDS` | Default cache TTL | `300` (5 min) | ❌ |
+| `CACHE_LLM_TTL_SECONDS` | LLM response cache TTL | `3600` (1 hour) | ❌ |
+| `RATE_LIMIT_REQUESTS` | Max requests per window | `60` | ❌ |
+| `RATE_LIMIT_WINDOW_SECONDS` | Rate limit window | `60` | ❌ |
 | `DEBUG` | Debug mode | `true` | ❌ |
+
+### Redis Caching
+
+The application uses Redis for:
+
+| Feature | Cache Key Pattern | TTL |
+|---------|------------------|-----|
+| LLM Responses | `chat:{upload_id}:{hash}` | 1 hour |
+| Timeline Data | `analytics:timeline:{upload_id}` | 10 min |
+| Word Cloud Data | `analytics:wordcloud:{upload_id}` | 10 min |
+| Network Data | `analytics:network:{upload_id}` | 10 min |
+
+### Rate Limiting
+
+| Endpoint | Limit |
+|----------|-------|
+| `/api/chat/*` | 30 req/min |
+| `/api/analytics/*` | 60 req/min |
+| `/api/uploads/*` | 10 req/min |
+| `/api/graph/*` | 20 req/min |
+
+Rate limit headers are included in all API responses:
+- `X-RateLimit-Limit`: Maximum requests allowed
+- `X-RateLimit-Remaining`: Requests remaining in window
+- `X-RateLimit-Window`: Window duration in seconds
 
 ### Frontend Environment Variables (`frontend/.env.local`)
 

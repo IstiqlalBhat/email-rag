@@ -15,6 +15,11 @@ from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone
 
 from core.config import settings
+from services.cache.redis_service import redis_service
+
+
+# Analytics cache TTL (10 minutes)
+ANALYTICS_CACHE_TTL = 600
 
 
 # Common stop words to filter from word cloud
@@ -74,6 +79,13 @@ class AnalyticsService:
         Get email activity over time.
         Returns counts grouped by date for timeline visualization.
         """
+        # Check cache first
+        cache_key = f"analytics:timeline:{upload_id}"
+        cached = await redis_service.get_cached(cache_key)
+        if cached:
+            logger.info(f"Cache hit for timeline data: {upload_id}")
+            return cached
+        
         logger.info(f"Computing timeline data for upload_id: {upload_id}")
         
         try:
@@ -146,11 +158,15 @@ class AnalyticsService:
             # Sort by date
             sorted_dates = sorted(date_counts.keys())
             
-            return {
+            result = {
                 "dates": sorted_dates,
                 "counts": [date_counts[d] for d in sorted_dates],
                 "total": sum(date_counts.values())
             }
+            
+            # Cache the result
+            await redis_service.set_cached(cache_key, result, ANALYTICS_CACHE_TTL)
+            return result
             
         except Exception as e:
             logger.error(f"Error computing timeline: {e}")
@@ -161,6 +177,13 @@ class AnalyticsService:
         Get word frequency data for word cloud visualization.
         Returns top N words with their counts.
         """
+        # Check cache first
+        cache_key = f"analytics:wordcloud:{upload_id}:{top_n}"
+        cached = await redis_service.get_cached(cache_key)
+        if cached:
+            logger.info(f"Cache hit for wordcloud data: {upload_id}")
+            return cached
+        
         logger.info(f"Computing word cloud data for upload_id: {upload_id}")
         
         try:
@@ -191,10 +214,14 @@ class AnalyticsService:
             # Get top N words
             top_words = word_counts.most_common(top_n)
             
-            return {
+            result = {
                 "words": [{"text": word, "value": count} for word, count in top_words],
                 "total_unique": len(word_counts)
             }
+            
+            # Cache the result
+            await redis_service.set_cached(cache_key, result, ANALYTICS_CACHE_TTL)
+            return result
             
         except Exception as e:
             logger.error(f"Error computing word cloud: {e}")
@@ -205,6 +232,13 @@ class AnalyticsService:
         Get relationship network data.
         Returns nodes (people) and edges (email connections) for network viz.
         """
+        # Check cache first
+        cache_key = f"analytics:network:{upload_id}"
+        cached = await redis_service.get_cached(cache_key)
+        if cached:
+            logger.info(f"Cache hit for network data: {upload_id}")
+            return cached
+        
         logger.info(f"Computing network data for upload_id: {upload_id}")
         
         try:
@@ -257,12 +291,16 @@ class AnalyticsService:
                             "weight": count
                         })
             
-            return {
+            result = {
                 "nodes": nodes,
                 "edges": edges,
                 "total_contacts": len(nodes),
                 "total_connections": len(edges)
             }
+            
+            # Cache the result
+            await redis_service.set_cached(cache_key, result, ANALYTICS_CACHE_TTL)
+            return result
             
         except Exception as e:
             logger.error(f"Error computing network: {e}")

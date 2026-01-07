@@ -10,6 +10,7 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_pinecone import PineconeVectorStore
@@ -18,11 +19,18 @@ from pinecone import Pinecone, ServerlessSpec
 from core.config import settings
 
 # Initialize LLM
-llm = ChatAnthropic(
-    model=settings.LLM_MODEL,
-    api_key=settings.ANTHROPIC_API_KEY,
-    temperature=0.3
-)
+if settings.LLM_PROVIDER == "google":
+    llm = ChatGoogleGenerativeAI(
+        model=settings.LLM_MODEL,
+        google_api_key=settings.GOOGLE_API_KEY,
+        temperature=0.3
+    )
+else:
+    llm = ChatAnthropic(
+        model=settings.LLM_MODEL,
+        api_key=settings.ANTHROPIC_API_KEY,
+        temperature=0.3
+    )
 
 # Initialize Embeddings
 embeddings = HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL)
@@ -227,6 +235,9 @@ def generate_response(state: ChatState) -> ChatState:
     """Generate final response using LLM with conversation history context."""
     logger.info(f"Generating response in {state['mode_used']} mode")
     
+    last_message = state["messages"][-1]
+    question = last_message.content if hasattr(last_message, 'content') else str(last_message)
+    
     # Build conversation history string for context
     history_str = ""
     messages = state.get("messages", [])
@@ -284,9 +295,6 @@ def generate_response(state: ChatState) -> ChatState:
             ("system", "EMAIL CONTEXT:\n{context}"),
             ("human", "{question}")
         ])
-    
-    last_message = state["messages"][-1]
-    question = last_message.content if hasattr(last_message, 'content') else str(last_message)
     
     chain = prompt | llm
     

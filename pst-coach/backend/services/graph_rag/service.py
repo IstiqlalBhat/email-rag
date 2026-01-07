@@ -1,87 +1,217 @@
 """
-Graph RAG Service - Main orchestration module.
+Graph RAG Service - Fast GPU-accelerated implementation.
 
-Provides the main interface for:
-- Building knowledge graphs from uploaded documents
-- Querying using graph-enhanced retrieval
-- Managing graph state per upload
+Optimized for speed:
+- GPU-accelerated embeddings
+- No LLM calls during graph building (NER only)
+- Batched processing
+- Configurable document limits
 """
 
 import os
 import json
 import pickle
+import time
+import threading
 from typing import Dict, Optional, Any, List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI, HarmBlockThreshold, HarmCategory
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_core.runnables import RunnableSerializable
+from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
 from core.config import settings
+
+
+class RateLimiter:
+    """Simple rate limiter for API calls."""
+
+    def __init__(self, max_rpm: int = 15, max_retries: int = 3, base_delay: float = 1.0):
+        self.max_rpm = max_rpm
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.request_times: List[float] = []
+        self._lock = threading.Lock()
+
+    def wait_for_rate_limit(self):
+        """Wait if rate limit reached."""
+        with self._lock:
+            now = time.time()
+            self.request_times = [t for t in self.request_times if now - t < 60]
+            if len(self.request_times) >= self.max_rpm:
+                wait_time = 60 - (now - self.request_times[0]) + 0.1
+                if wait_time > 0:
+                    logger.debug(f"Rate limit, waiting {wait_time:.1f}s")
+                    time.sleep(wait_time)
+                    self.request_times = self.request_times[1:]
+            self.request_times.append(time.time())
+
+    def execute_with_retry(self, func, *args, **kwargs):
+        """Execute with retry on rate limit errors."""
+        for attempt in range(self.max_retries):
+            try:
+                self.wait_for_rate_limit()
+                return func(*args, **kwargs)
+            except Exception as e:
+                if "rate" in str(e).lower() or "429" in str(e):
+                    wait = self.base_delay * (2 ** attempt)
+                    logger.warning(f"Rate limit error, waiting {wait}s")
+                    time.sleep(wait)
+                elif attempt == self.max_retries - 1:
+                    raise
+                else:
+                    time.sleep(self.base_delay)
+        raise Exception("Max retries exceeded")
+
+
+class RateLimitedLLM(RunnableSerializable):
+    """Rate-limited LLM wrapper."""
+
+    llm: Any
+    rate_limiter: Any
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, llm: Any, max_rpm: int = 15, **kwargs):
+        super().__init__(
+            llm=llm,
+            rate_limiter=RateLimiter(max_rpm=max_rpm),
+            **kwargs
+        )
+
+    @property
+    def max_rpm(self):
+        return self.rate_limiter.max_rpm
+
+    def invoke(self, input: Any, config: Optional[RunnableConfig] = None, **kwargs) -> Any:
+        return self.rate_limiter.execute_with_retry(self.llm.invoke, input, config=config, **kwargs)
+
+    def with_structured_output(self, schema, **kwargs):
+        structured = self.llm.with_structured_output(schema, **kwargs)
+        return RateLimitedStructuredLLM(structured=structured, rate_limiter=self.rate_limiter)
+
+
+class RateLimitedStructuredLLM(RunnableSerializable):
+    """Rate-limited structured output LLM."""
+
+    structured: Any
+    rate_limiter: Any
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, structured: Any, rate_limiter: RateLimiter, **kwargs):
+        super().__init__(structured=structured, rate_limiter=rate_limiter, **kwargs)
+
+    def invoke(self, input: Any, config: Optional[RunnableConfig] = None, **kwargs) -> Any:
+        return self.rate_limiter.execute_with_retry(self.structured.invoke, input, config=config, **kwargs)
+
+
 from .knowledge_graph import KnowledgeGraph
 from .query_engine import GraphQueryEngine
 from .models import GraphQueryResult, GraphBuildStatus, GraphVisualizationData
 
 
-# Global cache for built graphs
+# Global cache
 _graph_cache: Dict[str, "GraphRAGService"] = {}
 _build_status: Dict[str, GraphBuildStatus] = {}
+
+# Configuration - Process ALL emails by default for complete understanding
+MAX_EMAILS_DEFAULT = 0  # 0 = no limit, process all emails
+MAX_CHUNKS_DEFAULT = 0  # 0 = no limit, process all chunks
 
 
 class GraphRAGService:
     """
-    Main service for Graph RAG operations.
+    Fast Graph RAG service with GPU acceleration.
 
-    Handles:
-    - Loading documents from extracted emails
-    - Building knowledge graphs
-    - Processing queries with graph traversal
-    - Persisting and loading graph state
+    Key optimizations:
+    - Limits document count for reasonable processing time
+    - GPU-accelerated embeddings when available
+    - No LLM calls during graph building (NER only)
+    - Batched operations
     """
 
-    def __init__(self, upload_id: str):
-        """
-        Initialize GraphRAG service for a specific upload.
-
-        Args:
-            upload_id: The upload ID to process
-        """
+    def __init__(self, upload_id: str, max_emails: int = MAX_EMAILS_DEFAULT, max_chunks: int = MAX_CHUNKS_DEFAULT):
         self.upload_id = upload_id
+        self.max_emails = max_emails
+        self.max_chunks = max_chunks
         self.llm = self._init_llm()
         self.embedding_model = self._init_embeddings()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200
         )
-
         self.knowledge_graph: Optional[KnowledgeGraph] = None
         self.vector_store: Optional[FAISS] = None
         self.query_engine: Optional[GraphQueryEngine] = None
         self.splits: List[Document] = []
 
-    def _init_llm(self) -> ChatAnthropic:
-        """Initialize the LLM."""
-        return ChatAnthropic(
-            model=settings.LLM_MODEL,
-            anthropic_api_key=settings.ANTHROPIC_API_KEY,
-            temperature=0,
-            max_tokens=4000
-        )
+    def _init_llm(self) -> Any:
+        """Initialize LLM with rate limiting."""
+        if settings.LLM_PROVIDER == "google":
+            logger.info(f"Using Gemini: {settings.LLM_MODEL}")
+            base_llm = ChatGoogleGenerativeAI(
+                model=settings.LLM_MODEL,
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0,
+                convert_system_message_to_human=True,
+                max_output_tokens=4000,
+                safety_settings={
+                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                }
+            )
+        else:
+            logger.info(f"Using Anthropic: {settings.LLM_MODEL}")
+            base_llm = ChatAnthropic(
+                model=settings.LLM_MODEL,
+                anthropic_api_key=settings.ANTHROPIC_API_KEY,
+                temperature=0,
+                max_tokens=4000
+            )
+
+        return RateLimitedLLM(base_llm, max_rpm=getattr(settings, 'LLM_MAX_RPM', 15))
 
     def _init_embeddings(self) -> HuggingFaceEmbeddings:
-        """Initialize the embedding model."""
+        """Initialize GPU-accelerated embeddings."""
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Embeddings device: {device}")
+
+        model_kwargs = {'device': device, 'trust_remote_code': True}
+        encode_kwargs = {
+            'batch_size': 64 if device == "cuda" else 32,
+            'normalize_embeddings': True
+        }
+
         return HuggingFaceEmbeddings(
-            model_name=settings.EMBEDDING_MODEL
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs
         )
 
     def _load_documents(self) -> List[Document]:
-        """Load documents from extracted emails."""
+        """Load documents with configurable limit."""
         input_file = os.path.join(settings.EXTRACTED_DIR, f"{self.upload_id}.json")
 
+        # Fuzzy match if exact file not found
         if not os.path.exists(input_file):
-            logger.error(f"Extracted file not found: {input_file}")
-            return []
+            for filename in os.listdir(settings.EXTRACTED_DIR):
+                if filename.startswith(self.upload_id) and filename.endswith('.json') and not filename.endswith('_analysis.json'):
+                    input_file = os.path.join(settings.EXTRACTED_DIR, filename)
+                    logger.info(f"Matched file: {filename}")
+                    break
+            else:
+                logger.error(f"No file found for {self.upload_id}")
+                return []
 
         try:
             with open(input_file, "r", encoding="utf-8") as f:
@@ -89,6 +219,13 @@ class GraphRAGService:
 
             if isinstance(data, dict):
                 data = [data]
+
+            # Limit emails if specified (0 = no limit)
+            if self.max_emails > 0:
+                data = data[:self.max_emails]
+                logger.info(f"Processing {len(data)} emails (limited)")
+            else:
+                logger.info(f"Processing ALL {len(data)} emails")
 
             documents = []
             for email in data:
@@ -111,7 +248,6 @@ Subject: {email.get('subject', 'No Subject')}
                 )
                 documents.append(doc)
 
-            logger.info(f"Loaded {len(documents)} documents for upload {self.upload_id}")
             return documents
 
         except Exception as e:
@@ -119,34 +255,23 @@ Subject: {email.get('subject', 'No Subject')}
             return []
 
     def _get_graph_path(self) -> str:
-        """Get path for persisted graph."""
         graph_dir = os.path.join(settings.DATA_DIR, "graphs")
         os.makedirs(graph_dir, exist_ok=True)
         return os.path.join(graph_dir, f"{self.upload_id}_graph.pkl")
 
     def _get_vector_store_path(self) -> str:
-        """Get path for persisted vector store."""
         graph_dir = os.path.join(settings.DATA_DIR, "graphs")
         os.makedirs(graph_dir, exist_ok=True)
         return os.path.join(graph_dir, f"{self.upload_id}_vectors")
 
     def is_built(self) -> bool:
-        """Check if graph has been built for this upload."""
         return os.path.exists(self._get_graph_path())
 
     def build(self, progress_callback: Optional[callable] = None) -> bool:
-        """
-        Build the knowledge graph from documents.
+        """Build knowledge graph - FAST version with no LLM calls."""
+        logger.info(f"Building graph for {self.upload_id} (max {self.max_emails} emails, {self.max_chunks} chunks)")
+        start_time = time.time()
 
-        Args:
-            progress_callback: Optional callback(progress: float, message: str)
-
-        Returns:
-            True if successful, False otherwise
-        """
-        logger.info(f"Building graph for upload {self.upload_id}")
-
-        # Update status
         _build_status[self.upload_id] = GraphBuildStatus(
             upload_id=self.upload_id,
             status="building",
@@ -154,40 +279,48 @@ Subject: {email.get('subject', 'No Subject')}
         )
 
         try:
-            # Step 1: Load documents
+            # Step 1: Load limited documents
             documents = self._load_documents()
             if not documents:
                 raise ValueError("No documents found")
 
             if progress_callback:
-                progress_callback(0.1, "Documents loaded")
+                progress_callback(0.1, f"Loaded {len(documents)} emails")
             _build_status[self.upload_id].progress = 0.1
 
             # Step 2: Split documents
             self.splits = self.text_splitter.split_documents(documents)
-            logger.info(f"Created {len(self.splits)} chunks")
+
+            # Limit chunks if specified (0 = no limit)
+            if self.max_chunks > 0 and len(self.splits) > self.max_chunks:
+                logger.warning(f"Limiting chunks from {len(self.splits)} to {self.max_chunks}")
+                self.splits = self.splits[:self.max_chunks]
+
+            logger.info(f"Created {len(self.splits)} chunks for complete email understanding")
 
             if progress_callback:
-                progress_callback(0.2, "Documents chunked")
+                progress_callback(0.2, f"Created {len(self.splits)} chunks")
             _build_status[self.upload_id].progress = 0.2
 
-            # Step 3: Create vector store
+            # Step 3: Create vector store (GPU accelerated)
             logger.info("Creating vector store...")
             self.vector_store = FAISS.from_documents(self.splits, self.embedding_model)
 
             if progress_callback:
-                progress_callback(0.3, "Vector store created")
-            _build_status[self.upload_id].progress = 0.3
+                progress_callback(0.4, "Vector store created")
+            _build_status[self.upload_id].progress = 0.4
 
-            # Step 4: Build knowledge graph
+            # Step 4: Build knowledge graph - NO LLM CALLS, top-k neighbors for speed
             self.knowledge_graph = KnowledgeGraph(
-                edges_threshold=0.7,
+                edges_threshold=0.75,  # Slightly lower for better connectivity
                 alpha=0.7,
-                beta=0.3
+                beta=0.3,
+                use_llm_concepts=False,  # No LLM for concepts
+                top_k_neighbors=15  # Each node connects to top 15 similar nodes
             )
 
             def kg_progress(prog, msg):
-                total_progress = 0.3 + (prog * 0.6)  # Map 0-1 to 0.3-0.9
+                total_progress = 0.4 + (prog * 0.5)
                 if progress_callback:
                     progress_callback(total_progress, msg)
                 _build_status[self.upload_id].progress = total_progress
@@ -196,11 +329,10 @@ Subject: {email.get('subject', 'No Subject')}
                 self.splits,
                 self.llm,
                 self.embedding_model,
-                max_workers=4,
+                max_workers=1,  # Sequential for stability
                 progress_callback=kg_progress
             )
 
-            # Update status
             _build_status[self.upload_id].node_count = len(self.knowledge_graph.graph.nodes)
             _build_status[self.upload_id].edge_count = len(self.knowledge_graph.graph.edges)
 
@@ -213,7 +345,7 @@ Subject: {email.get('subject', 'No Subject')}
                 max_traversal_steps=10
             )
 
-            # Step 6: Persist graph
+            # Step 6: Persist
             self._persist()
 
             if progress_callback:
@@ -222,10 +354,10 @@ Subject: {email.get('subject', 'No Subject')}
             _build_status[self.upload_id].status = "ready"
             _build_status[self.upload_id].progress = 1.0
 
-            # Cache the service
             _graph_cache[self.upload_id] = self
 
-            logger.info(f"Graph build complete: {len(self.knowledge_graph.graph.nodes)} nodes, "
+            elapsed = time.time() - start_time
+            logger.info(f"Graph built in {elapsed:.1f}s: {len(self.knowledge_graph.graph.nodes)} nodes, "
                        f"{len(self.knowledge_graph.graph.edges)} edges")
             return True
 
@@ -236,9 +368,8 @@ Subject: {email.get('subject', 'No Subject')}
             return False
 
     def _persist(self) -> None:
-        """Persist graph and vector store to disk."""
+        """Persist graph to disk."""
         try:
-            # Save knowledge graph
             graph_data = {
                 "graph": self.knowledge_graph.graph,
                 "concept_cache": self.knowledge_graph.concept_cache,
@@ -249,44 +380,38 @@ Subject: {email.get('subject', 'No Subject')}
             with open(self._get_graph_path(), "wb") as f:
                 pickle.dump(graph_data, f)
 
-            # Save vector store
             self.vector_store.save_local(self._get_vector_store_path())
-
             logger.info(f"Graph persisted for {self.upload_id}")
 
         except Exception as e:
             logger.error(f"Failed to persist graph: {e}")
 
     def load(self) -> bool:
-        """Load persisted graph from disk."""
+        """Load persisted graph."""
         try:
             graph_path = self._get_graph_path()
             vector_path = self._get_vector_store_path()
 
             if not os.path.exists(graph_path):
-                logger.warning(f"No persisted graph found for {self.upload_id}")
                 return False
 
-            # Load knowledge graph
             with open(graph_path, "rb") as f:
                 graph_data = pickle.load(f)
 
             self.knowledge_graph = KnowledgeGraph(
-                edges_threshold=graph_data.get("edges_threshold", 0.7),
+                edges_threshold=graph_data.get("edges_threshold", 0.8),
                 alpha=graph_data.get("alpha", 0.7),
                 beta=graph_data.get("beta", 0.3)
             )
             self.knowledge_graph.graph = graph_data["graph"]
             self.knowledge_graph.concept_cache = graph_data.get("concept_cache", {})
 
-            # Load vector store
             self.vector_store = FAISS.load_local(
                 vector_path,
                 self.embedding_model,
                 allow_dangerous_deserialization=True
             )
 
-            # Initialize query engine
             self.query_engine = GraphQueryEngine(
                 vector_store=self.vector_store,
                 knowledge_graph=self.knowledge_graph,
@@ -295,8 +420,7 @@ Subject: {email.get('subject', 'No Subject')}
                 max_traversal_steps=10
             )
 
-            logger.info(f"Loaded graph for {self.upload_id}: "
-                       f"{len(self.knowledge_graph.graph.nodes)} nodes, "
+            logger.info(f"Loaded graph: {len(self.knowledge_graph.graph.nodes)} nodes, "
                        f"{len(self.knowledge_graph.graph.edges)} edges")
             return True
 
@@ -305,19 +429,11 @@ Subject: {email.get('subject', 'No Subject')}
             return False
 
     def query(self, query: str) -> GraphQueryResult:
-        """
-        Query the knowledge graph.
-
-        Args:
-            query: User's query string
-
-        Returns:
-            GraphQueryResult with answer and traversal info
-        """
+        """Query the knowledge graph."""
         if not self.query_engine:
             if not self.load():
                 return GraphQueryResult(
-                    answer="Graph has not been built yet. Please build the graph first.",
+                    answer="Graph not built. Please build the graph first.",
                     traversal_path=[],
                     traversal_steps=[],
                     filtered_content={},
@@ -327,7 +443,7 @@ Subject: {email.get('subject', 'No Subject')}
         return self.query_engine.query(query)
 
     def get_visualization_data(self, traversal_path: Optional[List[int]] = None) -> Dict[str, Any]:
-        """Get graph data for visualization."""
+        """Get graph visualization data."""
         if not self.knowledge_graph:
             if not self.load():
                 return {"nodes": [], "edges": [], "traversal_path": []}
@@ -335,12 +451,9 @@ Subject: {email.get('subject', 'No Subject')}
         return self.knowledge_graph.to_visualization_data(traversal_path)
 
 
-# ============================================================================
-# Module-level functions for external use
-# ============================================================================
-
+# Module-level functions
 def get_graph_service(upload_id: str) -> GraphRAGService:
-    """Get or create a GraphRAG service for an upload."""
+    """Get or create GraphRAG service."""
     if upload_id in _graph_cache:
         return _graph_cache[upload_id]
 
@@ -352,9 +465,10 @@ def get_graph_service(upload_id: str) -> GraphRAGService:
     return service
 
 
-def build_graph(upload_id: str, progress_callback: Optional[callable] = None) -> bool:
-    """Build a knowledge graph for an upload."""
-    service = GraphRAGService(upload_id)
+def build_graph(upload_id: str, progress_callback: Optional[callable] = None,
+                max_emails: int = MAX_EMAILS_DEFAULT, max_chunks: int = MAX_CHUNKS_DEFAULT) -> bool:
+    """Build knowledge graph with configurable limits."""
+    service = GraphRAGService(upload_id, max_emails=max_emails, max_chunks=max_chunks)
     success = service.build(progress_callback)
     if success:
         _graph_cache[upload_id] = service
@@ -368,26 +482,18 @@ def query_graph(upload_id: str, query: str) -> GraphQueryResult:
 
 
 def get_build_status(upload_id: str) -> GraphBuildStatus:
-    """Get the build status for an upload."""
+    """Get build status."""
     if upload_id in _build_status:
         return _build_status[upload_id]
 
     service = GraphRAGService(upload_id)
     if service.is_built():
-        return GraphBuildStatus(
-            upload_id=upload_id,
-            status="ready",
-            progress=1.0
-        )
+        return GraphBuildStatus(upload_id=upload_id, status="ready", progress=1.0)
 
-    return GraphBuildStatus(
-        upload_id=upload_id,
-        status="pending",
-        progress=0.0
-    )
+    return GraphBuildStatus(upload_id=upload_id, status="pending", progress=0.0)
 
 
 def get_visualization(upload_id: str, traversal_path: Optional[List[int]] = None) -> Dict[str, Any]:
-    """Get visualization data for an upload's graph."""
+    """Get visualization data."""
     service = get_graph_service(upload_id)
     return service.get_visualization_data(traversal_path)

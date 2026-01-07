@@ -11,13 +11,19 @@ from core.logging import setup_logging
 from api.routes import uploads, chat, analytics, graph_rag
 from api.middleware.error_handler import ErrorHandlerMiddleware
 from api.middleware.request_id import RequestIDMiddleware
+from api.middleware.rate_limiter import RateLimiterMiddleware
+from services.cache.redis_service import redis_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager."""
     setup_logging()
+    # Connect to Redis on startup
+    await redis_service.connect()
     yield
+    # Disconnect from Redis on shutdown
+    await redis_service.disconnect()
 
 
 app = FastAPI(
@@ -33,6 +39,7 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.DEBUG else settings.get_cors_origins(),
@@ -60,8 +67,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"}
+    """Health check endpoint with Redis status."""
+    redis_health = await redis_service.health_check()
+    return {
+        "status": "healthy",
+        "redis": redis_health
+    }
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+backend_logs.txt
 
 # Database
 *.db

@@ -3,6 +3,7 @@ import os
 from typing import List, Dict
 from loguru import logger
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from core.config import settings
@@ -81,11 +82,18 @@ def generate_insights(upload_id: str):
 
         # Call Claude
         logger.info("Calling Claude for insights...")
-        llm = ChatAnthropic(
-            model=settings.LLM_MODEL,
-            api_key=settings.ANTHROPIC_API_KEY,
-            temperature=0.2
-        )
+        if settings.LLM_PROVIDER == "google":
+            llm = ChatGoogleGenerativeAI(
+                model=settings.LLM_MODEL,
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0.2
+            )
+        else:
+            llm = ChatAnthropic(
+                model=settings.LLM_MODEL,
+                api_key=settings.ANTHROPIC_API_KEY,
+                temperature=0.2
+            )
         
         chain = ChatPromptTemplate.from_template(INSIGHTS_PROMPT) | llm | JsonOutputParser()
         

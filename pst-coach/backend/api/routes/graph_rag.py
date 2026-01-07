@@ -32,6 +32,8 @@ router = APIRouter()
 class GraphBuildRequest(BaseModel):
     """Request to build a knowledge graph."""
     upload_id: str
+    max_emails: int = 0  # 0 = process ALL emails for complete understanding
+    max_chunks: int = 0  # 0 = process ALL chunks
 
 
 class GraphQueryRequest(BaseModel):
@@ -117,8 +119,14 @@ async def start_graph_build(request: GraphBuildRequest, background_tasks: Backgr
             error=None
         )
 
-    # Start build in background
-    background_tasks.add_task(build_graph, request.upload_id)
+    # Start build in background with configurable limits
+    background_tasks.add_task(
+        build_graph,
+        request.upload_id,
+        None,  # progress_callback
+        request.max_emails,
+        request.max_chunks
+    )
 
     return GraphBuildStatusResponse(
         upload_id=request.upload_id,

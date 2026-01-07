@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+psycopg2://pstcoach:changeme123@127.0.0.1:5433/pst_coach"
 
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_TTL_SECONDS: int = 300  # 5 minutes default
+    CACHE_LLM_TTL_SECONDS: int = 3600  # 1 hour for LLM responses
+    RATE_LIMIT_REQUESTS: int = 60  # Max requests per window
+    RATE_LIMIT_WINDOW_SECONDS: int = 60  # 1 minute window
+
     # Storage
     # Local directory to store uploads and extracted files
     DATA_DIR: str = "data"
@@ -42,15 +49,22 @@ class Settings(BaseSettings):
     TIKA_SERVER_URL: str = "http://localhost:9998"
 
     # LLM Configuration
-    LLM_PROVIDER: str = "anthropic" 
+    LLM_PROVIDER: str = "google"
     ANTHROPIC_API_KEY: str = ""
-    LLM_MODEL: str = "claude-3-5-sonnet-20241022"
-    
+    GOOGLE_API_KEY: str = ""
+    LLM_MODEL: str = "gemini-3-flash-preview"
+
+    # Rate Limiting for LLM API calls
+    LLM_MAX_RETRIES: int = 3
+    LLM_RETRY_DELAY: float = 1.0  # Base delay in seconds
+    LLM_MAX_RPM: int = 15  # Max requests per minute (conservative for free tier)
+    LLM_BATCH_SIZE: int = 5  # Batch size for parallel operations
+
     # Embeddings
     # We will use local embeddings to avoid extra API costs/complexity for now, 
     # or Pinecone inference if available. Let's default to a solid local model suitable for RAG.
-    EMBEDDING_PROVIDER: str = "huggingface"
-    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_PROVIDER: str = "google"
+    EMBEDDING_MODEL: str = "models/text-embedding-004"
     EMBEDDING_DIMENSION: int = 384 # 1536 is for OpenAI, 384 for MiniLM
 
     # Application Limits
